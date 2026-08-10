@@ -167,8 +167,17 @@ namespace BfresLibrary.Switch
             if (Texture.TextureData[arrayLevel].Count < mipLevel)
                 throw new Exception($"Invalid mip level! {mipLevel}");
 
+            // GetImageData expects the combined data of EVERY array slice: it
+            // divides the buffer it receives by ArrayLength and walks all
+            // slices to reach the requested one. Passing a single slice's
+            // data made every arrayLevel of an array texture (ArrayLength > 1)
+            // deswizzle from a buffer 1/ArrayLength of the expected size;
+            // single-slice textures behave identically either way.
+            var allSlices = new List<byte[]>();
+            foreach (var slice in Texture.TextureData)
+                allSlices.Add(ByteUtils.CombineArray(slice.ToArray()));
             return TegraX1Swizzle.GetImageData(Texture,
-              ByteUtils.CombineArray(Texture.TextureData[arrayLevel].ToArray()), arrayLevel, mipLevel, 0,
+              ByteUtils.CombineArray(allSlices.ToArray()), arrayLevel, mipLevel, 0,
                Texture.BlockHeightLog2, 1, Texture.TileMode == TileMode.LinearAligned );
         }
 
