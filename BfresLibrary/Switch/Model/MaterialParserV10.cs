@@ -173,6 +173,11 @@ namespace BfresLibrary.Switch
                 LoadShaderOptions(info, mat);
             }
 
+            //Loading never kept this, so everything the shader assign carries - the archive
+            //and shading model names, the parameter and sampler tables - was unreachable
+            //from a material that had just been read.
+            mat.ShaderInfoV10 = info;
+
             loader.Seek(pos, SeekOrigin.Begin);
         }
 
@@ -183,10 +188,14 @@ namespace BfresLibrary.Switch
             {
                 RenderInfo renderInfo = new RenderInfo();
 
-                //Info table
+                //Info table. Sixteen bytes an entry: a 64-bit hash of the name where earlier
+                //files put a pointer to it, then the type. There is no string to read - the
+                //name is not in the file at all - so reading one gave an empty string for
+                //every entry, and filing two of those threw.
                 loader.Seek((int)info.ShaderAssign.renderInfoListOffset + i * 16, SeekOrigin.Begin);
-                renderInfo.Name = loader.LoadString(); //name offset
+                renderInfo.NameHash = loader.ReadUInt64();
                 renderInfo.Type = (RenderInfoType)loader.ReadByte();
+                renderInfo.Name = $"0x{renderInfo.NameHash:X16}";
 
 
 
@@ -232,12 +241,16 @@ namespace BfresLibrary.Switch
             {
                 ShaderParam param = new ShaderParam();
 
+                //Twenty-four bytes an entry: padding, the 64-bit name hash, then the offset
+                //into the parameter data and the type.
                 loader.Seek((int)info.ShaderAssign.shaderParamOffset + i * 24, SeekOrigin.Begin);
                 var pad0 = loader.ReadUInt64(); //padding
-                param.Name = loader.LoadString(); //name offset
-                param.DataOffset = loader.ReadUInt16(); //padding
-                param.Type = (ShaderParamType)loader.ReadUInt16(); //type
+                param.NameHash = loader.ReadUInt64();
+                param.DataOffset = loader.ReadUInt16();
+                param.Type = (ShaderParamType)loader.ReadUInt16();
                 var pad2 = loader.ReadUInt32(); //padding
+
+                param.Name = $"0x{param.NameHash:X16}";
 
                 param.Name = UniqueName(mat.ShaderParams.Keys, param.Name, i);
                 mat.ShaderParams.Add(param.Name, param);
@@ -576,8 +589,8 @@ namespace BfresLibrary.Switch
             public string ShaderArchiveName;
             public string ShadingModelName;
 
-            internal ulong shaderParamOffset;
-            internal ulong renderInfoListOffset;
+            public ulong shaderParamOffset;
+            public ulong renderInfoListOffset;
 
             public ushort ShaderParamSize;
 
@@ -619,7 +632,13 @@ namespace BfresLibrary.Switch
 
                     foreach (var renderInfo in ParentMaterial.RenderInfos.Values)
                     {
-                        saver.SaveString(renderInfo.Name);
+                        //A hash where the file names it by hash, a string where it does not -
+                        //the eight bytes are the same either way, and writing a string into a
+                        //file the game reads as a hash would be writing a pointer it would
+                        //follow somewhere meaningless.
+                        if (renderInfo.NameHash != 0) saver.Write(renderInfo.NameHash);
+                        else saver.SaveString(renderInfo.Name);
+
                         saver.Write((byte)renderInfo.Type);
                         saver.Write(new byte[7]);
                     }
@@ -632,7 +651,9 @@ namespace BfresLibrary.Switch
                     foreach (var param in ParentMaterial.ShaderParams.Values)
                     {
                         saver.Write(new byte[8]);
-                        saver.SaveString(param.Name);
+
+                        if (param.NameHash != 0) saver.Write(param.NameHash);
+                        else saver.SaveString(param.Name);
                         saver.Write((ushort)param.DataOffset);
                         saver.Write((ushort)param.Type);
                         saver.Write(new byte[4]);

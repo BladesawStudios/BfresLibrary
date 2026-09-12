@@ -46,6 +46,19 @@ namespace BfresLibrary
         /// </summary>
         public string Name { get; set; }
 
+        /// <summary>
+        /// The 64-bit hash of the name, where the file identifies this by hash rather than by
+        /// string.
+        /// </summary>
+        /// <remarks>
+        /// Tears of the Kingdom's materials store one of these in place of the name pointer
+        /// earlier files carry, so there is no string in the file to read. The hash is stable
+        /// across models, which an index is not, so it is what <see cref="Name"/> falls back
+        /// to when nothing named it.
+        /// </remarks>
+        public ulong NameHash { get; set; }
+
+
         // ---- METHODS (PUBLIC) ---------------------------------------------------------------------------------------
 
         /// <summary>
