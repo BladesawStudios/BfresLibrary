@@ -188,6 +188,8 @@ namespace BfresLibrary.Switch
                 renderInfo.Name = loader.LoadString(); //name offset
                 renderInfo.Type = (RenderInfoType)loader.ReadByte();
 
+
+
                 //Count table
                 loader.Seek((int)renderInfoCounterTable + i * 2, SeekOrigin.Begin);
                 ushort count = loader.ReadUInt16();
@@ -200,8 +202,28 @@ namespace BfresLibrary.Switch
                 loader.Seek((int)renderInfoDataTable + dataOffset, SeekOrigin.Begin);
                 renderInfo.ReadData(loader, renderInfo.Type, count);
 
+                renderInfo.Name = UniqueName(mat.RenderInfos.Keys, renderInfo.Name, i);
                 mat.RenderInfos.Add(renderInfo.Name, renderInfo);
             }
+        }
+
+
+        /// <summary>
+        /// A name to file an entry under when the one read back is unusable.
+        /// </summary>
+        /// <remarks>
+        /// Tears of the Kingdom's materials read back empty names for render infos, shader
+        /// params and the assign tables, which throws the moment a material has more than one
+        /// of anything - and most have several. These names are metadata that the geometry
+        /// does not depend on, so an entry that cannot be named is filed under its index
+        /// rather than costing the whole model.
+        /// </remarks>
+        static string UniqueName(IEnumerable<string> taken, string name, int index)
+        {
+            if (!string.IsNullOrEmpty(name) && !taken.Contains(name))
+                return name;
+
+            return $"{name}#{index}";
         }
 
         static void ReadShaderParams(ResFileLoader loader, ShaderInfo info, Material mat)
@@ -217,6 +239,7 @@ namespace BfresLibrary.Switch
                 param.Type = (ShaderParamType)loader.ReadUInt16(); //type
                 var pad2 = loader.ReadUInt32(); //padding
 
+                param.Name = UniqueName(mat.ShaderParams.Keys, param.Name, i);
                 mat.ShaderParams.Add(param.Name, param);
             }
         }
@@ -229,7 +252,7 @@ namespace BfresLibrary.Switch
                 var value = idx == -1 ? "<Default Value>" : info.AttribAssigns[idx];
                 var key = info.ShaderAssign.AttributeAssign.GetKey(i);
 
-                mat.ShaderAssign.AttribAssigns.Add(key, value);
+                mat.ShaderAssign.AttribAssigns.Add(UniqueName(mat.ShaderAssign.AttribAssigns.Keys, key, i), value);
             }
         }
 
@@ -241,7 +264,7 @@ namespace BfresLibrary.Switch
                 var value = idx == -1 ? "<Default Value>" : info.SamplerAssigns[idx];
                 var key = info.ShaderAssign.SamplerAssign.GetKey(i);
 
-                mat.ShaderAssign.SamplerAssigns.Add(key, value);
+                mat.ShaderAssign.SamplerAssigns.Add(UniqueName(mat.ShaderAssign.SamplerAssigns.Keys, key, i), value);
             }
         }
 
@@ -260,7 +283,7 @@ namespace BfresLibrary.Switch
                 var value = idx == -1 ? "<Default Value>" : choices[idx];
                 var key = info.ShaderAssign.Options.GetKey(i);
 
-                mat.ShaderAssign.ShaderOptions.Add(key, value);
+                mat.ShaderAssign.ShaderOptions.Add(UniqueName(mat.ShaderAssign.ShaderOptions.Keys, key, i), value);
             }
         }
 
