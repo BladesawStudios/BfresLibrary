@@ -20,6 +20,18 @@ namespace BfresLibrary
 
         private const string _signature = "FRES";
 
+        /// <summary>
+        /// Resolves a name stored as a key into a string table outside the file, or null when the key
+        /// is unknown. Null leaves such names empty, as they always were.
+        /// </summary>
+        /// <remarks>
+        /// TotK's v10 materials name their shader options this way: where a string offset would be,
+        /// there is a 64-bit key into the game's shared <c>Shader/ExternalBinaryString.bfres</c>, which
+        /// the engine resolves with a binary search at load. An offset that points past the end of the
+        /// file is one of these. The table lives outside the file, so reading it is the caller's job.
+        /// </remarks>
+        public static Func<ulong, string> ExternalStringResolver { get; set; }
+
         // ---- CONSTRUCTORS & DESTRUCTOR ------------------------------------------------------------------------------
 
         /// <summary>

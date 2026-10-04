@@ -115,7 +115,7 @@ namespace BfresLibrary.Switch.Core
                 return StringCache.Strings[offset];
 
             if (offset < 0 || offset > this.BaseStream.Length)
-                return "";
+                return ResFile.ExternalStringResolver?.Invoke(unchecked((ulong)offset)) ?? "";
 
             encoding = encoding ?? Encoding;
             using (TemporarySeek(offset, SeekOrigin.Begin))
