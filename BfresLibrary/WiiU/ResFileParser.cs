@@ -33,7 +33,7 @@ namespace BfresLibrary.WiiU
             resFile.TexSrtAnims = loader.LoadDict<MaterialAnim>();
             resFile.TexPatternAnims = loader.LoadDict<MaterialAnim>();
             resFile.BoneVisibilityAnims = loader.LoadDict<VisibilityAnim>();
-            loader.LoadDict<VisibilityAnim>();
+            resFile.MatVisibilityAnimsWiiU = loader.LoadDict<VisibilityAnim>();
             resFile.ShapeAnims = loader.LoadDict<ShapeAnim>();
 
             resFile.Textures = new ResDict<TextureShared>();
@@ -86,7 +86,7 @@ namespace BfresLibrary.WiiU
             saver.SaveDict(resFile.TexSrtAnims);
             saver.SaveDict(resFile.TexPatternAnims);
             saver.SaveDict(resFile.BoneVisibilityAnims);
-            saver.SaveDict(resFile.MatVisibilityAnims);
+            saver.SaveDict(resFile.MatVisibilityAnimsWiiU);
             saver.SaveDict(resFile.ShapeAnims);
             saver.SaveDict(resFile.SceneAnims);
             saver.SaveDict(resFile.ExternalFiles);
@@ -98,7 +98,7 @@ namespace BfresLibrary.WiiU
             saver.Write((ushort)resFile.TexSrtAnims.Count);
             saver.Write((ushort)resFile.TexPatternAnims.Count);
             saver.Write((ushort)resFile.BoneVisibilityAnims.Count);
-            saver.Write((ushort)resFile.MatVisibilityAnims.Count);
+            saver.Write((ushort)resFile.MatVisibilityAnimsWiiU.Count);
             saver.Write((ushort)resFile.ShapeAnims.Count);
             saver.Write((ushort)resFile.SceneAnims.Count);
             saver.Write((ushort)resFile.ExternalFiles.Count);

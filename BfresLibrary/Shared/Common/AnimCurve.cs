@@ -257,6 +257,7 @@ namespace BfresLibrary
                         throw new ResException($"Invalid {nameof(FrameType)}.");
                 }
             }, (uint)FrameArrayOffset);
+            var boolWords = new List<uint>();
             Keys = loader.LoadCustom(() =>
             {
                 int elementsPerKey = ElementsPerKey;
@@ -268,7 +269,13 @@ namespace BfresLibrary
                         {
                             for (int j = 0; j < elementsPerKey; j++)
                             {
-                                if (CurveType == AnimCurveType.StepInt || CurveType == AnimCurveType.StepBool)
+                                if (CurveType == AnimCurveType.StepBool)
+                                {
+                                    uint word = loader.ReadUInt32();
+                                    boolWords.Add(word);
+                                    keys[i, j] = word;
+                                }
+                                else if (CurveType == AnimCurveType.StepInt)
                                     keys[i, j] = loader.ReadUInt32();
                                 else
                                     keys[i, j] = loader.ReadSingle();
@@ -308,7 +315,7 @@ namespace BfresLibrary
                 for (int i = 0; i < Keys.Length; i++) {
                     if (numKey <= keyIndex) break;
 
-                    int value = (int)Keys[i, 0];
+                    uint value = i < boolWords.Count ? boolWords[i] : (uint)Keys[i, 0];
 
                     //Bit shift each key value
                     for (int j = 0; j < 32; j++)
@@ -385,27 +392,17 @@ namespace BfresLibrary
             if (CurveType != AnimCurveType.StepBool)
                 return;
 
-            int bitPosition = 0;
             var keyData = KeyStepBoolData;
             //32 boolean bits per key
-            List<uint> keys = new List<uint>() { 0 };
-
+            var keys = new uint[System.Math.Max(1, (keyData.Length + 31) / 32)];
             for (int i = 0; i < keyData.Length; i++) {
-                //Set bit for keyed data
                 if (keyData[i])
-                    keys[keys.Count - 1] |= (uint)(1 << bitPosition);
-
-                bitPosition++;
-                //Reset position and add a new key after 32 bits
-                //Make sure to skip adding a new key if this is the last boolean key
-                if (bitPosition > 32 && keyData.Length - 1 != i) {
-                    keys.Add(0);
-                    bitPosition = 0;
-                }
+                    keys[i / 32] |= 1u << (i % 32);
             }
-            //Apply the key data
-            this.Keys = new float[keys.Count, 1];
-            for (int i = 0; i < keys.Count; i++)
+            //Apply the key data. The packed words are kept separately as floats can't hold all 32 bits.
+            _boolWords = keys;
+            this.Keys = new float[keys.Length, 1];
+            for (int i = 0; i < keys.Length; i++)
                 this.Keys[i, 0] = keys[i];
         }
 
@@ -431,8 +428,16 @@ namespace BfresLibrary
             }
         }
 
+        private uint[] _boolWords;
+
         public void SaveKeyData(ResFileSaver saver)
         {
+            if (CurveType == AnimCurveType.StepBool && KeyType == AnimCurveKeyType.Single && _boolWords != null && _boolWords.Length == Keys.GetLength(0))
+            {
+                foreach (uint word in _boolWords)
+                    saver.Write(word);
+                return;
+            }
             switch (KeyType)
             {
                 case AnimCurveKeyType.Single:

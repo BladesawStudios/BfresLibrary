@@ -335,6 +335,11 @@ namespace BfresLibrary
         public ResDict<VisibilityAnim> BoneVisibilityAnims { get; set; } = new ResDict<VisibilityAnim>();
 
         /// <summary>
+        /// Gets or sets the Wii U material visibility animations (FVIS) stored in this <see cref="ResFile"/>.
+        /// </summary>
+        public ResDict<VisibilityAnim> MatVisibilityAnimsWiiU { get; set; } = new ResDict<VisibilityAnim>();
+
+        /// <summary>
         /// Gets or sets the stored <see cref="VisibilityAnim"/> (FVIS) instances for material visibility animations.
         /// </summary>
         [Browsable(false)]
@@ -532,6 +537,8 @@ namespace BfresLibrary
 
             if (MatVisibilityAnims == null)
                 MatVisibilityAnims = new ResDict<MaterialAnim>();
+            if (MatVisibilityAnimsWiiU == null)
+                MatVisibilityAnimsWiiU = new ResDict<VisibilityAnim>();
 
             for (int i = 0; i < Models.Count; i++) {
                 for (int s = 0; s < Models[i].Shapes.Count; s++) {

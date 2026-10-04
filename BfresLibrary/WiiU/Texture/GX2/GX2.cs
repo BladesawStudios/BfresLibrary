@@ -90,6 +90,13 @@ namespace BfresLibrary.Swizzling
             public uint tileType = 0;
             public TileInfo pTileInfo = new TileInfo();
             public int tileIndex = 0;
+
+            public surfaceOut Copy()
+            {
+                var copy = (surfaceOut)MemberwiseClone();
+                copy.pTileInfo = pTileInfo?.Copy();
+                return copy;
+            }
         }
 
         public class Flags
@@ -105,6 +112,8 @@ namespace BfresLibrary.Swizzling
             public int macroAspectRatio = 0;
             public int tileSplitBytes = 0;
             public int pipeConfig = 0;
+
+            public TileInfo Copy() => (TileInfo)MemberwiseClone();
         }
 
         static surfaceIn pIn = new surfaceIn();
@@ -641,219 +650,79 @@ namespace BfresLibrary.Swizzling
 
         public static byte[] Decode(GX2Surface tex, int ArrayIndex = -1, int MipIndex = -1, string DebugTextureName = "")
         {
-            uint blkWidth, blkHeight;
-            if (IsFormatBCN((GX2SurfaceFormat)tex.format))
-            {
-                blkWidth = 4;
-                blkHeight = 4;
-            }
-            else
-            {
-                blkWidth = 1;
-                blkHeight = 1;
-            }
-
+            if (tex.data == null || tex.data.Length <= 0)
+                tex.data = tex.mipData;
             if (tex.mipOffset == null || tex.mipOffset.Length == 0)
                 tex.mipOffset = GenerateMipOffsets(tex);
-
-            var ImageSurfInfo = getSurfaceInfo((GX2SurfaceFormat)tex.format, tex.width, tex.height, tex.depth, (uint)tex.dim, (uint)tex.tileMode, (uint)tex.aa, 0);
-            uint bpp = DIV_ROUND_UP(ImageSurfInfo.bpp, 8);
-
             if (tex.numArray == 0)
                 tex.numArray = 1;
 
-            if (tex.data.Length <= 0)
-                tex.data = tex.mipData;
-
-
-            byte[] data = new byte[tex.data.Length];
-            byte[] mipdata = new byte[0];
-
-            if (tex.mipData != null)
-                mipdata = new byte[tex.mipData.Length];
-
-            uint mipCount = tex.numMips;
-            if (tex.mipData == null || tex.mipData.Length <= 0)
-                mipCount = 1;
-
-            int dataOffset = 0;
-            int mipDataOffset = 0;
-
-            for (int arrayLevel = 0; arrayLevel < tex.depth; arrayLevel++)
-            {
-                int mipSpliceSize = 0;
-
-                for (int mipLevel = 0; mipLevel < mipCount; mipLevel++)
-                {
-                    var MipSurfInfo = getSurfaceInfo((GX2SurfaceFormat)tex.format, tex.width, tex.height, tex.depth, (uint)tex.dim, (uint)tex.tileMode, (uint)tex.aa, mipLevel);
-
-                    bool GetLevel = (arrayLevel == ArrayIndex && mipLevel == MipIndex);
-
-                    uint swizzle = tex.swizzle;
-
-                    uint width_ = (uint)Math.Max(1, tex.width >> mipLevel);
-                    uint height_ = (uint)Math.Max(1, tex.height >> mipLevel);
-
-                    uint size = DIV_ROUND_UP(width_, blkWidth) * DIV_ROUND_UP(height_, blkHeight) * bpp;
-
-                    uint mipOffset = 0;
-                    if (mipLevel != 0)
-                    {
-                        if (tex.mip_swizzle != 0)
-                            swizzle = tex.mip_swizzle;
-
-                        mipOffset = (tex.mipOffset[mipLevel - 1]);
-                        if (mipLevel == 1)
-                        {
-                            mipOffset -= (uint)ImageSurfInfo.surfSize;
-                            mipSpliceSize = (int)MipSurfInfo.sliceSize;
-                        }
-
-                        if (GetLevel)
-                        {
-                            Array.Copy(tex.mipData, 0, mipdata, 0, tex.mipData.Length);
-                            Array.Copy(tex.mipData, (int)mipOffset, mipdata, 0, (int)MipSurfInfo.sliceSize);
-                            data = mipdata;
-                        }
-                    }
-                    else if (GetLevel)
-                    {
-                        Array.Copy(tex.data, 0, data, 0, tex.data.Length);
-                        Array.Copy(tex.data, (uint)dataOffset, data, 0, size);
-                    }
-                    if (GetLevel)
-                    {
-                        byte[] deswizzled = deswizzle(width_, height_, MipSurfInfo.depth, MipSurfInfo.height, (uint)tex.format, 0, tex.use,
-                        MipSurfInfo.tileMode, (uint)swizzle, MipSurfInfo.pitch, MipSurfInfo.bpp, (uint)arrayLevel, 0, data);
-                        //Create a copy and use that to remove uneeded data
-                        byte[] result_ = new byte[size];
-                        Array.Copy(deswizzled, 0, result_, 0, size);
-                        return result_;
-                    }
-                }
-
-                dataOffset += (int)ImageSurfInfo.sliceSize;
-                mipDataOffset += mipSpliceSize;
-            }
-            return null;
+            uint mipCount = tex.mipData == null || tex.mipData.Length <= 0 ? 1 : tex.numMips;
+            if (ArrayIndex < 0 || ArrayIndex >= Math.Max(1, tex.depth) || MipIndex < 0 || MipIndex >= mipCount)
+                return null;
+            return DecodeLevel(tex, (uint)ArrayIndex, MipIndex);
         }
 
         public static List<List<byte[]>> Decode(GX2Surface tex, string DebugTextureName = "")
         {
             if (tex.data == null || tex.data.Length <= 0)
                 throw new Exception("Invalid GX2 surface data. Make sure to not open Tex2 files if this is one. Those will load automatically next to Tex1!");
-
-            var surfdEBUG = getSurfaceInfo((GX2SurfaceFormat)tex.format, tex.width, tex.height, tex.depth, (uint)tex.dim, (uint)tex.tileMode, (uint)tex.aa, 0);
-            Debug(surfdEBUG);
-            /*     Console.WriteLine("");
-                 Console.WriteLine("// ----- GX2Surface Decode Info ----- ");
-                 Console.WriteLine("  dim             = " + tex.dim);
-                 Console.WriteLine("  width           = " + tex.width);
-                 Console.WriteLine("  height          = " + tex.height);
-                 Console.WriteLine("  depth           = " + tex.depth);
-                 Console.WriteLine("  numMips         = " + tex.numMips);
-                 Console.WriteLine("  format          = " + (GX2SurfaceFormat)tex.format);
-                 Console.WriteLine("  aa              = " + tex.aa);
-                 Console.WriteLine("  use             = " + tex.use);
-                 Console.WriteLine("  imageSize       = " + tex.imageSize);
-                 Console.WriteLine("  mipSize         = " + tex.mipSize);
-                 Console.WriteLine("  tileMode        = " + (GX2TileMode)tex.tileMode);
-                 Console.WriteLine("  swizzle         = " + tex.swizzle);
-                 Console.WriteLine("  alignment       = " + tex.alignment);
-                 Console.WriteLine("  pitch           = " + tex.pitch);
-                 Console.WriteLine("  bits per pixel  = " + (tex.bpp << 3));
-                 Console.WriteLine("  bytes per pixel = " + tex.bpp);
-                 Console.WriteLine("  data size       = " + tex.data.Length);
-                 Console.WriteLine("  realSize        = " + tex.imageSize);*/
-
             if (tex.mipOffset == null || tex.mipOffset.Length == 0)
                 tex.mipOffset = GenerateMipOffsets(tex);
+            if (tex.numArray == 0)
+                tex.numArray = 1;
 
-            uint blkWidth, blkHeight;
+            uint mipCount = tex.mipData == null || tex.mipData.Length <= 0 ? 1 : tex.numMips;
+            var result = new List<List<byte[]>>();
+            for (uint arrayLevel = 0; arrayLevel < Math.Max(1, tex.depth); arrayLevel++)
+            {
+                var mips = new List<byte[]>();
+                for (int mipLevel = 0; mipLevel < mipCount; mipLevel++)
+                    mips.Add(DecodeLevel(tex, arrayLevel, mipLevel));
+                result.Add(mips);
+            }
+            return result;
+        }
+
+        private static byte[] DecodeLevel(GX2Surface tex, uint arrayLevel, int mipLevel)
+        {
+            uint blkWidth = 1, blkHeight = 1;
             if (IsFormatBCN((GX2SurfaceFormat)tex.format))
             {
                 blkWidth = 4;
                 blkHeight = 4;
             }
-            else
+
+            var levelInfo = getSurfaceInfo((GX2SurfaceFormat)tex.format, tex.width, tex.height, tex.depth, (uint)tex.dim, (uint)tex.tileMode, (uint)tex.aa, mipLevel);
+            uint bpp = DIV_ROUND_UP(levelInfo.bpp, 8);
+            uint width_ = (uint)Math.Max(1, tex.width >> mipLevel);
+            uint height_ = (uint)Math.Max(1, tex.height >> mipLevel);
+            uint size = DIV_ROUND_UP(width_, blkWidth) * DIV_ROUND_UP(height_, blkHeight) * bpp;
+
+            byte[] source = tex.data;
+            uint swizzle = tex.swizzle;
+            if (mipLevel != 0)
             {
-                blkWidth = 1;
-                blkHeight = 1;
-            }
+                if (tex.mip_swizzle != 0)
+                    swizzle = tex.mip_swizzle;
 
-            byte[] data = tex.data;
-
-            var surfInfo = getSurfaceInfo((GX2SurfaceFormat)tex.format, tex.width, tex.height, tex.depth, (uint)tex.dim, (uint)tex.tileMode, (uint)tex.aa, 0);
-            uint bpp = DIV_ROUND_UP(surfInfo.bpp, 8);
-
-            if (surfInfo.depth != 1)
-            {
-                //       System.Windows.Forms.MessageBox.Show($"Unsupported Depth {surfInfo.depth} for texture {DebugTextureName}!");
-                //   return new List<List<byte[]>>();
-            }
-
-            if (tex.numArray == 0)
-                tex.numArray = 1;
-
-            uint mipCount = tex.numMips;
-            if (tex.mipData == null || tex.mipData.Length <= 0)
-                mipCount = 1;
-
-            int ArrayImageize = 0;
-            int ArrayMipImageize = 0;
-
-            if (tex.mipData != null)
-                ArrayMipImageize = tex.mipData.Length / (int)tex.depth;
-
-            int dataOffset = 0;
-            int mipDataOffset = 0;
-            int TotalImageSize = tex.data.Length;
-
-            List<List<byte[]>> result = new List<List<byte[]>>();
-            for (int arrayLevel = 0; arrayLevel < tex.depth; arrayLevel++)
-            {
-                List<byte[]> mips = new List<byte[]>();
-                for (int mipLevel = 0; mipLevel < mipCount; mipLevel++)
+                long offset = tex.mipOffset[mipLevel - 1];
+                if (mipLevel == 1)
                 {
-                    uint swizzle = tex.swizzle;
-
-                    uint width_ = (uint)Math.Max(1, tex.width >> mipLevel);
-                    uint height_ = (uint)Math.Max(1, tex.height >> mipLevel);
-
-                    uint size = DIV_ROUND_UP(width_, blkWidth) * DIV_ROUND_UP(height_, blkHeight) * bpp;
-
-                    uint mipOffset;
-                    if (mipLevel != 0)
-                    {
-                        if (tex.mip_swizzle != 0)
-                            swizzle = tex.mip_swizzle;
-
-                        mipOffset = (tex.mipOffset[mipLevel - 1]);
-                        if (mipLevel == 1)
-                            mipOffset -= (uint)surfInfo.sliceSize;
-
-                        surfInfo = getSurfaceInfo((GX2SurfaceFormat)tex.format, tex.width, tex.height, tex.depth, (uint)tex.dim, (uint)tex.tileMode, (uint)tex.aa, mipLevel);
-                        data = new byte[surfInfo.sliceSize];
-                        Array.Copy(tex.mipData, (uint)mipDataOffset + mipOffset, data, 0, surfInfo.sliceSize);
-                    }
-                    else
-                        Array.Copy(tex.data, (uint)dataOffset, data, 0, size);
-
-                    byte[] deswizzled = deswizzle(width_, height_, surfInfo.depth, surfInfo.height, (uint)tex.format, 0, tex.use,
-                    surfInfo.tileMode, (uint)swizzle, surfInfo.pitch, surfInfo.bpp, (uint)arrayLevel, 0, data);
-                    //Create a copy and use that to remove uneeded data
-                    byte[] result_ = new byte[size];
-                    Array.Copy(deswizzled, 0, result_, 0, size);
-                    mips.Add(result_);
+                    var imageInfo = getSurfaceInfo((GX2SurfaceFormat)tex.format, tex.width, tex.height, tex.depth, (uint)tex.dim, (uint)tex.tileMode, (uint)tex.aa, 0);
+                    offset -= imageInfo.surfSize;
                 }
-
-                result.Add(mips);
-
-                dataOffset += (int)surfInfo.sliceSize;
-                mipDataOffset += (int)surfInfo.sliceSize;
-
+                if (offset < 0 || offset >= tex.mipData.Length)
+                    return null;
+                source = new byte[tex.mipData.Length - offset];
+                Array.Copy(tex.mipData, offset, source, 0, source.Length);
             }
 
+            byte[] deswizzled = deswizzle(width_, height_, levelInfo.depth, levelInfo.height, (uint)tex.format, 0, tex.use,
+                levelInfo.tileMode, swizzle, levelInfo.pitch, levelInfo.bpp, arrayLevel, 0, source);
+
+            byte[] result = new byte[size];
+            Array.Copy(deswizzled, 0, result, 0, Math.Min(size, deswizzled.Length));
             return result;
         }
         private static byte[] SubArray(byte[] data, int offset, int length)
@@ -899,15 +768,15 @@ namespace BfresLibrary.Swizzling
         public static byte[] deswizzle(uint width, uint height, uint depth, uint height_, uint format_, uint aa, uint use, uint tileMode, uint swizzle_,
              uint pitch, uint bpp, uint slice, uint sample, byte[] data)
         {
-            return swizzleSurf(width, height, depth, format_, aa, use, tileMode, swizzle_, pitch, bpp, slice, sample, data, 0);
+            return swizzleSurf(width, height, height_, depth, format_, aa, use, tileMode, swizzle_, pitch, bpp, slice, sample, data, 0);
         }
         public static byte[] swizzle(uint width, uint height, uint depth, uint height_, uint format_, uint aa, uint use, uint tileMode, uint swizzle_,
      uint pitch, uint bpp, uint slice, uint sample, byte[] data)
         {
-            return swizzleSurf(width, height, depth, format_, aa, use, tileMode, swizzle_, pitch, bpp, slice, sample, data, 1);
+            return swizzleSurf(width, height, height_, depth, format_, aa, use, tileMode, swizzle_, pitch, bpp, slice, sample, data, 1);
         }
 
-        private static byte[] swizzleSurf(uint width, uint height, uint depth, uint format, uint aa, uint use, uint tileMode, uint swizzle_,
+        private static byte[] swizzleSurf(uint width, uint height, uint surfHeight, uint depth, uint format, uint aa, uint use, uint tileMode, uint swizzle_,
                 uint pitch, uint bitsPerPixel, uint slice, uint sample, byte[] data, int swizzle)
         {
             uint bytesPerPixel = bitsPerPixel / 8;
@@ -941,15 +810,15 @@ namespace BfresLibrary.Swizzling
                 {
                     if (tileMode == 0 || tileMode == 1)
                     {
-                        pos = computeSurfaceAddrFromCoordLinear((uint)x, (uint)y, slice, sample, bytesPerPixel, pitch, height, depth);
+                        pos = computeSurfaceAddrFromCoordLinear((uint)x, (uint)y, slice, sample, bytesPerPixel, pitch, surfHeight, depth);
                     }
                     else if (tileMode == 2 || tileMode == 3)
                     {
-                        pos = computeSurfaceAddrFromCoordMicroTiled((uint)x, (uint)y, slice, bitsPerPixel, pitch, height, (AddrTileMode)tileMode, IsDepth);
+                        pos = computeSurfaceAddrFromCoordMicroTiled((uint)x, (uint)y, slice, bitsPerPixel, pitch, surfHeight, (AddrTileMode)tileMode, IsDepth);
                     }
                     else
                     {
-                        pos = computeSurfaceAddrFromCoordMacroTiled((uint)x, (uint)y, slice, sample, bitsPerPixel, pitch, height, numSamples, (AddrTileMode)tileMode, IsDepth, pipeSwizzle, bankSwizzle);
+                        pos = computeSurfaceAddrFromCoordMacroTiled((uint)x, (uint)y, slice, sample, bitsPerPixel, pitch, surfHeight, numSamples, (AddrTileMode)tileMode, IsDepth, pipeSwizzle, bankSwizzle);
                     }
 
 
@@ -2578,7 +2447,15 @@ namespace BfresLibrary.Swizzling
         /// <param name="surfaceTileMode">The <see cref="GX2TileMode"/ of the surface.</param>
         /// <param name="surfaceAA">The <see cref="GX2AAMode"/ of the surface.</param>
         /// <param name="level">The mip level of which the info will be calculated for (first mipmap corresponds to value 1</param>
+        static readonly object SurfaceInfoLock = new object();
+
         public static surfaceOut getSurfaceInfo(GX2SurfaceFormat surfaceFormat, uint surfaceWidth, uint surfaceHeight, uint surfaceDepth, uint surfaceDim, uint surfaceTileMode, uint surfaceAA, int level)
+        {
+            lock (SurfaceInfoLock)
+                return getSurfaceInfoUnsafe(surfaceFormat, surfaceWidth, surfaceHeight, surfaceDepth, surfaceDim, surfaceTileMode, surfaceAA, level).Copy();
+        }
+
+        private static surfaceOut getSurfaceInfoUnsafe(GX2SurfaceFormat surfaceFormat, uint surfaceWidth, uint surfaceHeight, uint surfaceDepth, uint surfaceDim, uint surfaceTileMode, uint surfaceAA, int level)
         {
             uint dim = 0;
             uint width = 0;

@@ -93,8 +93,8 @@ namespace BfresLibrary
         [Category("Blend Control")]
         public RenderStateFlagsBlendMode FlagsBlendMode
         {
-            get { return (RenderStateFlagsBlendMode)(_flags & _flagsMaskBlendMode); }
-            set { _flags = _flags & ~_flagsMaskBlendMode | (uint)value; }
+            get { return (RenderStateFlagsBlendMode)((_flags & _flagsMaskBlendMode) >> 4); }
+            set { _flags = _flags & ~_flagsMaskBlendMode | ((uint)value << 4 & _flagsMaskBlendMode); }
         }
 
         private AlphaControl _alphaControl;
