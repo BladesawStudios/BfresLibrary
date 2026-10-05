@@ -628,7 +628,8 @@ namespace BfresLibrary.Switch
                 saver.SaveString(ShadingModelName);
                 saver.SaveCustom(new long[ParentMaterial.RenderInfos.Count], () =>
                 {
-                    ((ResFileSwitchSaver)saver).SaveRelocateEntryToSection(saver.Position, 1, (uint)ParentMaterial.RenderInfos.Count, 1, ResFileSwitchSaver.Section1, "Render Param Info V10");
+                    if (ParentMaterial.RenderInfos.Count > 0)
+                        ((ResFileSwitchSaver)saver).SaveRelocateEntryToSection(saver.Position, 1, (uint)ParentMaterial.RenderInfos.Count, 1, ResFileSwitchSaver.Section1, "Render Param Info V10");
 
                     foreach (var renderInfo in ParentMaterial.RenderInfos.Values)
                     {
@@ -646,7 +647,8 @@ namespace BfresLibrary.Switch
                 saver.SaveDict(ParentMaterial.RenderInfos);
                 saver.SaveCustom(new long[ParentMaterial.ShaderParams.Count], () =>
                 {
-                    ((ResFileSwitchSaver)saver).SaveRelocateEntryToSection(saver.Position, 2, (uint)ParentMaterial.ShaderParams.Count, 1, ResFileSwitchSaver.Section1, "Shader Param Info V10");
+                    if (ParentMaterial.ShaderParams.Count > 0)
+                        ((ResFileSwitchSaver)saver).SaveRelocateEntryToSection(saver.Position, 2, (uint)ParentMaterial.ShaderParams.Count, 1, ResFileSwitchSaver.Section1, "Shader Param Info V10");
 
                     foreach (var param in ParentMaterial.ShaderParams.Values)
                     {
