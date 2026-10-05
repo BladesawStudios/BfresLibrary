@@ -55,6 +55,11 @@ namespace BfresLibrary
 
             AlphaRefValue = 0.5F;
 
+            ColorControl = new ColorControl()
+            {
+                LogicOp = GX2LogicOp.Copy,
+            };
+
 
             BlendControl = new BlendControl()
             {

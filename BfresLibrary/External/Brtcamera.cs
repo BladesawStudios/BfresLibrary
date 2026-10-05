@@ -28,9 +28,9 @@ namespace BfresLibrary
         public KeyFrame[] KeyFrames { get; set; }
 
         /// <summary>
-        /// 
+        /// Two 16-bit values stored after the frame count (each is byte swapped on its own).
         /// </summary>
-        public float UnknownValue { get; set; }
+        public ushort[] UnknownValues { get; set; } = new ushort[2];
 
         /// <summary>
         /// 
@@ -63,7 +63,7 @@ namespace BfresLibrary
             Name = reader.ReadChars(64);
             uint count = reader.ReadUInt32();
             FrameCount = reader.ReadUInt32();
-            UnknownValue = reader.ReadSingle();
+            UnknownValues = reader.ReadUInt16s(2);
 
             KeyFrames = new KeyFrame[count];
             for (int i = 0; i < count; i++)
@@ -85,7 +85,7 @@ namespace BfresLibrary
             writer.Write(Name);
             writer.Write(KeyFrames.Length);
             writer.Write(FrameCount);
-            writer.Write(UnknownValue);
+            writer.Write(UnknownValues);
             for (int i = 0; i < KeyFrames.Length; i++)
             {
                 writer.Write(KeyFrames[i].Flag);

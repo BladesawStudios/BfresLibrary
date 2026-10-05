@@ -280,6 +280,7 @@ namespace BfresLibrary.WiiU
             surf.numArray = ArrayLength;
             surf.tileMode = (uint)TileMode;
             surf.swizzle = Swizzle;
+            surf.mip_swizzle = MipSwizzle;
 
             return Swizzling.GX2.Decode(surf, arrayLevel, mipLevel);
         }
@@ -288,7 +289,8 @@ namespace BfresLibrary.WiiU
         /// Converts a Wii U texture instance to a switch texture.
         /// </summary>
         /// <param name="texture"></param>
-        public void FromSwitch(Switch.SwitchTexture textureNX)
+        /// <param name="bankSwizzle">Picks the GX2 bank/pipe swizzle (0-7) once format and channels are set.</param>
+        public void FromSwitch(Switch.SwitchTexture textureNX, System.Func<Texture, uint> bankSwizzle = null)
         {
             Width = textureNX.Width;
             Height = textureNX.Height;
@@ -301,38 +303,58 @@ namespace BfresLibrary.WiiU
             Format = PlatformConverters.TextureConverter.FormatList.FirstOrDefault(
                 x => x.Value == textureNX.Format).Key;
             Name = textureNX.Name;
+            CompSelR = ConvertChannelSelector(textureNX.Texture.ChannelRed);
+            CompSelG = ConvertChannelSelector(textureNX.Texture.ChannelGreen);
+            CompSelB = ConvertChannelSelector(textureNX.Texture.ChannelBlue);
+            CompSelA = ConvertChannelSelector(textureNX.Texture.ChannelAlpha);
+            if (textureNX.ArrayLength > 1)
+            {
+                Dim = GX2SurfaceDim.Dim2DArray;
+                Depth = textureNX.ArrayLength;
+            }
+            TileMode = (GX2TileMode)Swizzling.GX2.getDefaultGX2TileMode((uint)Dim, Width, Height, 1, (uint)Format, 0, (uint)Use);
+            Swizzle = (bankSwizzle?.Invoke(this) ?? 0) << 8;
 
-            //Save arrays and mips into a list for swizzling back
+            //Gather every slice (all mips, linear) and swizzle them into one GX2 surface.
+            var slices = new byte[textureNX.ArrayLength][];
             for (int i = 0; i < textureNX.ArrayLength; i++)
             {
                 List<byte[]> mipData = new List<byte[]>();
                 for (int j = 0; j < textureNX.MipCount; j++)
                     mipData.Add(textureNX.GetDeswizzledData(i, j));
-
-                //Swizzle the current mip data into a switch swizzled image
-                var surface = SwizzleSurfaceMipMaps(ByteUtils.CombineArray(mipData.ToArray()));
-                Data = surface.data;
-                MipData = surface.mipData;
-                TileMode = (GX2TileMode)surface.tileMode;
-                MipOffsets = surface.mipOffset;
-                MipCount = surface.numMips;
-                Alignment = surface.alignment;
-                Pitch = surface.pitch;
-                Swizzle = surface.swizzle;
-                Regs = surface.texRegs;
+                slices[i] = ByteUtils.CombineArray(mipData.ToArray());
             }
+            var surface = Swizzling.GX2.CreateGx2Texture(slices[0], Name, (uint)TileMode, (uint)AAMode, Width, Height, Depth,
+                (uint)Format, SwizzlePattern, (uint)Dim, MipCount, textureNX.ArrayLength > 1 ? slices : null);
+            Data = surface.data;
+            MipData = surface.mipData;
+            TileMode = (GX2TileMode)surface.tileMode;
+            MipOffsets = surface.mipOffset;
+            MipCount = surface.numMips;
+            Alignment = surface.alignment;
+            Pitch = surface.pitch;
+            Swizzle = surface.swizzle;
+            Regs = surface.texRegs;
 
             CompSelR = ConvertChannelSelector(textureNX.Texture.ChannelRed);
             CompSelG = ConvertChannelSelector(textureNX.Texture.ChannelGreen);
             CompSelB = ConvertChannelSelector(textureNX.Texture.ChannelBlue);
             CompSelA = ConvertChannelSelector(textureNX.Texture.ChannelAlpha);
 
-       /*     //Convert user data. BNTX doesn't share the same user data library atm so it needs manual conversion.
+            //Convert user data. Wii U texture strings are wide strings.
             UserData = new ResDict<UserData>();
-            foreach (var userData in textureNX.UserData)
+            foreach (var userData in textureNX.Texture.UserData ?? new List<Syroot.NintenTools.NSW.Bntx.UserData>())
             {
-
-            }*/
+                var data = new UserData { Name = userData.Name };
+                switch (userData.Type)
+                {
+                    case Syroot.NintenTools.NSW.Bntx.UserDataType.Int32: data.SetValue(userData.GetValueInt32Array()); break;
+                    case Syroot.NintenTools.NSW.Bntx.UserDataType.Single: data.SetValue(userData.GetValueSingleArray()); break;
+                    case Syroot.NintenTools.NSW.Bntx.UserDataType.Byte: data.SetValue(userData.GetValueByteArray()); break;
+                    default: data.SetValue(userData.GetValueStringArray(), true); break;
+                }
+                UserData.Add(data.Name, data);
+            }
         }
 
         // ---- METHODS ------------------------------------------------------------------------------------------------

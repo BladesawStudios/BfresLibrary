@@ -100,7 +100,7 @@ namespace BfresLibrary.Switch
             Texture.ArrayLength = textureU.ArrayLength;
             Texture.TileMode = TileMode.Default;
             Texture.Depth = 1;
-            Texture.SurfaceDim = SurfaceDim.Dim2D;
+            Texture.SurfaceDim = textureU.ArrayLength > 1 ? SurfaceDim.Dim2DArray : SurfaceDim.Dim2D;
             Texture.Dim = Dim.Dim2D;
             Texture.Format = PlatformConverters.TextureConverter.FormatList[textureU.Format];
             Texture.Name = textureU.Name;
@@ -119,10 +119,17 @@ namespace BfresLibrary.Switch
                 List<byte[]> mipmaps = SwizzleSurfaceMipMaps(ByteUtils.CombineArray(mipData.ToArray()));
                 Texture.TextureData.Add(mipmaps);
 
-                //Combine mip map data
+                //Combine mip map data. Array slices start on a block-height aligned stride.
                 byte[] combinedMips = ByteUtils.CombineArray(mipmaps.ToArray());
+                if (textureU.ArrayLength > 1)
+                {
+                    uint stride = TegraX1Swizzle.round_up((uint)combinedMips.Length, 512u << (int)Texture.BlockHeightLog2);
+                    combinedMips = ByteUtils.CombineArray(combinedMips, new byte[stride - combinedMips.Length]);
+                }
                 Texture.TextureData[i][0] = combinedMips;
             }
+            if (textureU.ArrayLength > 1)
+                Texture.ImageSize = (uint)(Texture.TextureData[0][0].Length * textureU.ArrayLength);
 
             Texture.ChannelRed = ConvertChannelSelector(textureU.CompSelR);
             Texture.ChannelGreen = ConvertChannelSelector(textureU.CompSelG);
@@ -131,9 +138,20 @@ namespace BfresLibrary.Switch
 
             //Convert user data. BNTX doesn't share the same user data library atm so it needs manual conversion.
             Texture.UserData = new List<Syroot.NintenTools.NSW.Bntx.UserData>();
-            foreach (var userData in textureU.UserData)
+            Texture.UserDataDict = new Syroot.NintenTools.NSW.Bntx.ResDict();
+            foreach (var userData in textureU.UserData.Values)
             {
-
+                var data = new Syroot.NintenTools.NSW.Bntx.UserData { Name = userData.Name };
+                switch (userData.Type)
+                {
+                    case UserDataType.Int32: data.SetValue(userData.GetValueInt32Array()); break;
+                    case UserDataType.Single: data.SetValue(userData.GetValueSingleArray()); break;
+                    case UserDataType.Byte: data.SetValue(userData.GetValueByteArray()); break;
+                    //Switch stores wide-string user data as UTF-8 strings.
+                    default: data.SetValue(userData.GetValueStringArray(), false); break;
+                }
+                Texture.UserData.Add(data);
+                Texture.UserDataDict.Add(userData.Name);
             }
         }
 
@@ -284,11 +302,14 @@ namespace BfresLibrary.Switch
                 }
                 else
                 {
-                    if (TegraX1Swizzle.pow2_round_up(height__) < linesPerBlockHeight)
-                        blockHeightShift += 1;
+                    //A mip's block height (in GOBs) shrinks to the smallest power of two that covers its height.
+                    uint mipBlockHeight = Math.Max(1, Math.Min(blockHeight, TegraX1Swizzle.pow2_round_up(TegraX1Swizzle.DIV_ROUND_UP(height__, 8))));
+                    blockHeightShift = 0;
+                    while ((blockHeight >> blockHeightShift) > mipBlockHeight)
+                        blockHeightShift++;
 
                     Pitch = TegraX1Swizzle.round_up(width__ * bpp, 64);
-                    SurfaceSize += Pitch * TegraX1Swizzle.round_up(height__, Math.Max(1, blockHeight >> blockHeightShift) * 8);
+                    SurfaceSize += Pitch * TegraX1Swizzle.round_up(height__, mipBlockHeight * 8);
                 }
 
                 byte[] SwizzledData = TegraX1Swizzle.swizzle(width_, height_, depth_, blkWidth, blkHeight,

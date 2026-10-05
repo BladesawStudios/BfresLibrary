@@ -436,9 +436,12 @@ namespace BfresLibrary.Swizzling
         }
         static bool DebugSurface = false;
 
+        /// <param name="slices">For array textures, the linear data (all mips) of each slice. Depth is the slice count.</param>
         public static GX2Surface CreateGx2Texture(byte[] imageData, string Name, uint TileMode, uint AAMode,
-               uint Width, uint Height, uint Depth, uint Format, uint swizzle, uint SurfaceDim, uint MipCount)
+               uint Width, uint Height, uint Depth, uint Format, uint swizzle, uint SurfaceDim, uint MipCount, byte[][] slices = null)
         {
+            if (slices != null && slices.Length > 0)
+                imageData = slices[0];
             var surfOut = getSurfaceInfo((GX2SurfaceFormat)Format, Width, Height, Depth, SurfaceDim, TileMode, AAMode, 0);
 
             uint imageSize = (uint)surfOut.surfSize;
@@ -452,14 +455,7 @@ namespace BfresLibrary.Swizzling
             if (dataSize <= 0)
                 throw new Exception($"Image is empty!!");
 
-            uint s = 0;
-            if (TileMode == 1 || TileMode == 2 ||
-                  TileMode == 3 || TileMode == 16)
-            {
-                s = swizzle << 8;
-            }
-            else
-                s = 0xd0000 | swizzle << 8;
+            uint s = swizzle << 8;
 
             uint blkWidth, blkHeight;
             if (GX2.IsFormatBCN((GX2SurfaceFormat)Format))
@@ -481,7 +477,8 @@ namespace BfresLibrary.Swizzling
             if (TileMode == 3)
                 tilingDepth /= 4;
 
-            if (tilingDepth != 1)
+            bool isArray = SurfaceDim == (uint)BfresLibrary.GX2.GX2SurfaceDim.Dim2DArray || SurfaceDim == (uint)BfresLibrary.GX2.GX2SurfaceDim.Dim1DArray;
+            if (tilingDepth != 1 && !isArray)
                 throw new Exception($"Unsupported Depth {surfOut.depth}!");
 
             int tiling1dLevel = 0;
@@ -495,6 +492,12 @@ namespace BfresLibrary.Swizzling
 
             uint Splice = 0;
 
+            //Mip layout: level n starts at the next multiple of its base alignment. When the chain drops from macro
+            //tiling to 1D tiling at level 2 or later, (swizzle & 0xFFFF) bytes of padding come first.
+            uint layoutOffset = imageSize;
+            uint mipStart = 0;
+            bool macroTiled = !(surfOut.tileMode == 0 || surfOut.tileMode == 1 || surfOut.tileMode == 2 || surfOut.tileMode == 3 || surfOut.tileMode == 16);
+
             for (int mipLevel = 0; mipLevel < MipCount; mipLevel++)
             {
                 var result = TextureHelper.GetCurrentMipSize(Width, Height, blkWidth, blkHeight, bpp, mipLevel);
@@ -502,30 +505,52 @@ namespace BfresLibrary.Swizzling
                 uint offset = result.Item1;
                 uint size = result.Item2;
 
-                byte[] data_ = new byte[size];
-                Array.Copy(imageData, offset, data_, 0, size);
-
                 uint width_ = Math.Max(1, Width >> mipLevel);
                 uint height_ = Math.Max(1, Height >> mipLevel);
 
+                byte[] dataAlignBytes = new byte[0];
                 if (mipLevel != 0)
                 {
-                    surfOut = GX2.getSurfaceInfo((GX2SurfaceFormat)Format, Width, Height, 1, 1, TileMode, 0, mipLevel);
+                    surfOut = GX2.getSurfaceInfo((GX2SurfaceFormat)Format, Width, Height, Depth, SurfaceDim, TileMode, 0, mipLevel);
 
+                    bool levelMacroTiled = !(surfOut.tileMode == 1 || surfOut.tileMode == 2 || surfOut.tileMode == 3 || surfOut.tileMode == 16);
+                    if (macroTiled && !levelMacroTiled)
+                    {
+                        macroTiled = false;
+                        if (mipLevel > 1)
+                            layoutOffset += s & 0xFFFF;
+                    }
+                    uint aligned = RoundUp(layoutOffset, surfOut.baseAlign);
                     if (mipLevel == 1)
-                        mipOffsets.Add(imageSize);
+                    {
+                        mipOffsets.Add(aligned);
+                        mipStart = aligned;
+                    }
                     else
-                        mipOffsets.Add(mipSize);
+                    {
+                        mipOffsets.Add(aligned - mipStart);
+                        dataAlignBytes = new byte[aligned - layoutOffset + (layoutOffset - mipStart - mipSize)];
+                    }
+                    layoutOffset = aligned + (uint)surfOut.surfSize;
+                    mipSize = layoutOffset - mipStart;
                 }
 
-                data_ = ByteUtils.CombineArray(data_, new byte[surfOut.surfSize - size]);
-                byte[] dataAlignBytes = new byte[RoundUp(mipSize, surfOut.baseAlign) - mipSize];
-
-                if (mipLevel != 0)
-                    mipSize += (uint)(surfOut.surfSize + dataAlignBytes.Length);
-
-                byte[] SwizzledData = GX2.swizzle(width_, height_, surfOut.depth, surfOut.height, (uint)Format, 0, 1, surfOut.tileMode, s,
-                        surfOut.pitch, surfOut.bpp, Splice, 0, data_);
+                //Every slice of an array texture shares the level's surface; each one is swizzled into its own slice.
+                byte[] SwizzledData = null;
+                int sliceCount = slices != null && slices.Length > 0 ? slices.Length : 1;
+                for (int slice = 0; slice < sliceCount; slice++)
+                {
+                    byte[] source = slices != null && slices.Length > 0 ? slices[slice] : imageData;
+                    byte[] data_ = new byte[surfOut.surfSize];
+                    Array.Copy(source, offset, data_, 0, size);
+                    byte[] sliceData = GX2.swizzle(width_, height_, surfOut.depth, surfOut.height, (uint)Format, 0, 1, surfOut.tileMode, s,
+                            surfOut.pitch, surfOut.bpp, (uint)slice, 0, data_);
+                    if (SwizzledData == null)
+                        SwizzledData = sliceData;
+                    else
+                        for (int i = 0; i < SwizzledData.Length; i++)
+                            SwizzledData[i] |= sliceData[i];
+                }
 
                 Swizzled.Add(dataAlignBytes.Concat(SwizzledData).ToArray());
 
@@ -539,10 +564,9 @@ namespace BfresLibrary.Swizzling
                     tiling1dLevel += 1;
             }
 
-            if (tiling1dLevelSet)
-                s |= (uint)(tiling1dLevel << 16);
-            else
-                s |= (uint)(13 << 16);
+            //The level byte is the first mip that is no longer macro tiled, or 13 if none of them drops to 1D tiling.
+            if (TileMode != 1 && TileMode != 2 && TileMode != 3 && TileMode != 16)
+                s |= (uint)((tiling1dLevelSet ? tiling1dLevel : 13) << 16);
 
             GX2.GX2Surface surf = new GX2.GX2Surface();
             surf.depth = Depth;
@@ -913,7 +937,10 @@ namespace BfresLibrary.Swizzling
                     tileMode = 7;
 
                 var surfOut = getSurfaceInfo((GX2SurfaceFormat)format_, width, height, depth, dim, tileMode, aa, 0);
-                if (width < surfOut.pitchAlign && height < surfOut.heightAlign)
+                //The alignments are in elements, which are 4x4 blocks for BCn formats.
+                uint elementWidth = IsFormatBCN((GX2SurfaceFormat)format_) ? (width + 3) / 4 : width;
+                uint elementHeight = IsFormatBCN((GX2SurfaceFormat)format_) ? (height + 3) / 4 : height;
+                if (elementWidth < surfOut.pitchAlign && elementHeight < surfOut.heightAlign)
                 {
                     if (tileMode == 7)
                         tileMode = 3;

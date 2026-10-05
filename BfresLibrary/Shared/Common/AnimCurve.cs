@@ -155,20 +155,23 @@ namespace BfresLibrary
         /// <returns></returns>
         public uint CalculateBakeSize(bool isSwitch)
         {
-            if (isSwitch)
+            // Fitted against every BotW material and visibility animation on both platforms.
+            uint span = (uint)(System.Math.Floor(EndFrame) - System.Math.Floor(StartFrame));
+            uint frames = span + 1;
+            if (CurveType == AnimCurveType.StepBool)
             {
-                if (CurveType == AnimCurveType.StepInt || CurveType == AnimCurveType.StepBool)
-                    return (uint)(1 * (EndFrame - StartFrame + 1) + 12) + 4;
-                else
-                    return (uint)(4 * (EndFrame - StartFrame + 1) + 32 ) - 4;
+                // One bit per frame, packed in 32-bit (Wii U) or 64-bit (Switch) words.
+                if (span <= 1)
+                    return 0;
+                return isSwitch ? 16 + 8 * ((frames + 63) / 64) : 8 + 4 * ((frames + 31) / 32);
             }
-            else
+            if (CurveType == AnimCurveType.StepInt)
             {
-                if (CurveType == AnimCurveType.StepInt || CurveType == AnimCurveType.StepBool)
-                    return (uint)(1 * (EndFrame - StartFrame + 1) + 8);
-                else
-                    return (uint)(4 * (EndFrame - StartFrame + 1) + 20);
+                if (span <= 1)
+                    return 0;
+                return isSwitch ? 16 + 8 * ((frames + 7) / 8) : 8 + frames;
             }
+            return isSwitch ? 32 + 8 * ((span + 1) / 2) : 4 * frames + 20;
         }
 
         public AnimCurve Copy()
@@ -188,6 +191,9 @@ namespace BfresLibrary
 
             for (int i = 0; i < this.Frames.Length; i++)
                 curve.Frames[i] = this.Frames[i];
+
+            if (this.KeyStepBoolData != null)
+                curve.KeyStepBoolData = (bool[])this.KeyStepBoolData.Clone();
 
             for (int i = 0; i < this.Keys.Length / this.ElementsPerKey; i++)
             {
@@ -261,11 +267,13 @@ namespace BfresLibrary
             Keys = loader.LoadCustom(() =>
             {
                 int elementsPerKey = ElementsPerKey;
-                float[,] keys = new float[numKey, elementsPerKey];
+                //Bool keys are packed 32 per word.
+                int numRows = CurveType == AnimCurveType.StepBool ? (numKey + 31) / 32 : numKey;
+                float[,] keys = new float[numRows, elementsPerKey];
                 switch (KeyType)
                 {
                     case AnimCurveKeyType.Single:
-                        for (int i = 0; i < numKey; i++)
+                        for (int i = 0; i < numRows; i++)
                         {
                             for (int j = 0; j < elementsPerKey; j++)
                             {

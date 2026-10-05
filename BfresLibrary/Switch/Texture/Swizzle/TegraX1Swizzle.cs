@@ -53,12 +53,14 @@ namespace BfresLibrary.Swizzling
 
                         uint size = TegraX1Swizzle.DIV_ROUND_UP(width, blkWidth) * TegraX1Swizzle.DIV_ROUND_UP(height, blkHeight) * bpp;
 
-                        if (TegraX1Swizzle.pow2_round_up(TegraX1Swizzle.DIV_ROUND_UP(height, blkWidth)) < linesPerBlockHeight)
-                            blockHeightShift += 1;
-
-
                         uint width__ = TegraX1Swizzle.DIV_ROUND_UP(width, blkWidth);
                         uint height__ = TegraX1Swizzle.DIV_ROUND_UP(height, blkHeight);
+
+                        //A mip's block height (in GOBs) shrinks to the smallest power of two that covers its height.
+                        uint mipBlockHeight = Math.Min(1u << (int)BlockHeightLog2, TegraX1Swizzle.pow2_round_up(TegraX1Swizzle.DIV_ROUND_UP(height__, 8)));
+                        int mipBlockHeightLog2 = 0;
+                        while ((1u << (mipBlockHeightLog2 + 1)) <= mipBlockHeight)
+                            mipBlockHeightLog2++;
 
                         //Calculate the mip size instead
                         byte[] AlignedData = new byte[(TegraX1Swizzle.round_up(SurfaceSize, DataAlignment) - SurfaceSize)];
@@ -73,9 +75,9 @@ namespace BfresLibrary.Swizzling
                         try
                         {
                             Pitch = TegraX1Swizzle.round_up(width__ * bpp, 64);
-                            SurfaceSize += Pitch * TegraX1Swizzle.round_up(height__, Math.Max(1, blockHeight >> blockHeightShift) * 8);
+                            SurfaceSize += Pitch * TegraX1Swizzle.round_up(height__, mipBlockHeight * 8);
 
-                            byte[] result = TegraX1Swizzle.deswizzle(width, height, depth, blkWidth, blkHeight, blkDepth, target, bpp, TileMode, (int)Math.Max(0, BlockHeightLog2 - blockHeightShift), data_);
+                            byte[] result = TegraX1Swizzle.deswizzle(width, height, depth, blkWidth, blkHeight, blkDepth, target, bpp, TileMode, mipBlockHeightLog2, data_);
                             //Create a copy and use that to remove uneeded data
                             byte[] result_ = new byte[size];
                             Array.Copy(result, 0, result_, 0, size);
@@ -134,6 +136,7 @@ namespace BfresLibrary.Swizzling
             { SurfaceFormat.R16_UINT,                 new FormatInfo(2, 1, 1) },
             { SurfaceFormat.R8_UNORM,                 new FormatInfo(1, 1, 1) },
             { SurfaceFormat.R8_G8_UNORM,              new FormatInfo(2, 1, 1) },
+            { SurfaceFormat.D32_FLOAT_S8X24_UINT,     new FormatInfo(8, 1, 1) },
             { SurfaceFormat.R32_G8_X24_UNORM,         new FormatInfo(8, 1, 1) },
             { SurfaceFormat.B8_G8_R8_A8_UNORM,        new FormatInfo(4, 1, 1) },
             { SurfaceFormat.B8_G8_R8_A8_SRGB,         new FormatInfo(4, 1, 1) },

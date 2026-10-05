@@ -194,7 +194,13 @@ namespace BfresLibrary
             set
             {
                 if (IsPlatformSwitch)
-                    Alignment = (uint)(value >> 7);
+                {
+                    //Switch stores the alignment as a power of two.
+                    uint shift = 0;
+                    while ((1 << (int)(shift + 1)) <= value && shift < 30)
+                        shift++;
+                    Alignment = shift;
+                }
                 else
                     Alignment = (uint)value;
             }
@@ -430,11 +436,22 @@ namespace BfresLibrary
             }
             else
             {
+                //Switch keeps its textures in an embedded BNTX that is not loaded into Textures.
+                foreach (var key in ExternalFiles.Keys.Where(x => x.EndsWith(".bntx")).ToList())
+                {
+                    var ext = ExternalFiles[key];
+                    var bntx = ext.LoadedFileData as Syroot.NintenTools.NSW.Bntx.BntxFile
+                        ?? new Syroot.NintenTools.NSW.Bntx.BntxFile(new MemoryStream(ext.Data));
+                    foreach (var tex in bntx.Textures)
+                        if (!Textures.ContainsKey(tex.Name))
+                            Textures.Add(tex.Name, new Switch.SwitchTexture(bntx, tex));
+                }
+
                 List<TextureShared> textures = new List<TextureShared>();
                 foreach (var tex in this.Textures.Values)
                 {
                     var textureU = new WiiU.Texture();
-                    textureU.FromSwitch((Switch.SwitchTexture)tex);
+                    textureU.FromSwitch((Switch.SwitchTexture)tex, handle == PlatformConverters.ConverterHandle.BOTW ? PlatformConverters.BotwTextureFiles.BankSwizzle : (System.Func<WiiU.Texture, uint>)null);
                     textures.Add(textureU);
                 }
                 Textures.Clear();
@@ -498,21 +515,73 @@ namespace BfresLibrary
                     anim.Name = $"{anim.Name}_fcl";
                 }
 
+                //Switch stores wide-string user data as UTF-8 strings.
+                foreach (var model in Models.Values)
+                {
+                    var userData = model.UserData.Values
+                        .Concat(model.Materials.Values.SelectMany(x => x.UserData.Values))
+                        .Concat(model.Skeleton.Bones.Values.SelectMany(x => x.UserData?.Values ?? Enumerable.Empty<UserData>()));
+                    foreach (var data in userData.Where(x => x.Type == UserDataType.WString))
+                        data.SetValue(data.GetValueStringArray(), false);
+                }
+
                 foreach (var anim in TexPatternAnims.Values) {
                     anim.Name = $"{anim.Name}_ftp";
+                    PlatformConverters.MaterialAnimConverter.TexPatternToSwitch(anim);
                 }
 
                 foreach (var anim in MatVisibilityAnims.Values) {
                     anim.Name = $"{anim.Name}_fvs";
                 }
+
+                foreach (var anim in MatVisibilityAnimsWiiU.Values) {
+                    var converted = PlatformConverters.VisibilityAnimConverter.ToSwitch(anim);
+                    MatVisibilityAnims.Add(converted.Name, converted);
+                }
+                MatVisibilityAnimsWiiU.Clear();
             }
             else
             {
+                MatVisibilityAnimsWiiU.Clear();
+                foreach (var dict in new[] { ShaderParamAnims, ColorAnims, TexSrtAnims, TexPatternAnims, MatVisibilityAnims }) {
+                    foreach (var anim in dict.Values.Where(PlatformConverters.VisibilityAnimConverter.IsVisibilityAnim)) {
+                        var converted = PlatformConverters.VisibilityAnimConverter.ToWiiU(anim);
+                        MatVisibilityAnimsWiiU.Add(converted.Name, converted);
+                    }
+                }
+
+                var switchAnims = ShaderParamAnims.Values.Concat(TexSrtAnims.Values).Concat(ColorAnims.Values)
+                    .Concat(TexPatternAnims.Values).Concat(MatVisibilityAnims.Values)
+                    .Where(x => !PlatformConverters.VisibilityAnimConverter.IsVisibilityAnim(x)).ToList();
+
                 this.TexPatternAnims = new ResDict<MaterialAnim>();
                 this.ShaderParamAnims = new ResDict<MaterialAnim>();
                 this.ColorAnims = new ResDict<MaterialAnim>();
                 this.TexSrtAnims = new ResDict<MaterialAnim>();
                 this.MatVisibilityAnims = new ResDict<MaterialAnim>();
+
+                foreach (var anim in switchAnims)
+                {
+                    var kind = PlatformConverters.MaterialAnimConverter.KindOf(anim.Name)
+                        ?? (anim.MaterialAnimDataList.Any(x => x.PatternAnimInfos?.Count > 0) ? PlatformConverters.MaterialAnimConverter.TexPatternSuffix : PlatformConverters.MaterialAnimConverter.ShaderParamSuffix);
+                    anim.Name = PlatformConverters.MaterialAnimConverter.StripKind(anim.Name);
+                    switch (kind)
+                    {
+                        case PlatformConverters.MaterialAnimConverter.TexPatternSuffix:
+                            PlatformConverters.MaterialAnimConverter.TexPatternToWiiU(anim);
+                            TexPatternAnims.Add(anim.Name, anim);
+                            break;
+                        case PlatformConverters.MaterialAnimConverter.TexSrtSuffix:
+                            TexSrtAnims.Add(anim.Name, anim);
+                            break;
+                        case PlatformConverters.MaterialAnimConverter.ColorSuffix:
+                            ColorAnims.Add(anim.Name, anim);
+                            break;
+                        default:
+                            ShaderParamAnims.Add(anim.Name, anim);
+                            break;
+                    }
+                }
             }
         }
 
@@ -642,10 +711,10 @@ namespace BfresLibrary
                 foreach (var subAnim in anim.MaterialAnimDataList)
                 {
                     if (subAnim.Curves.Count > 0)
-                        subAnim.TexturePatternCurveIndex = curveIndex;
+                        subAnim.ShaderParamCurveIndex = curveIndex;
                     subAnim.InfoIndex = infoIndex;
                     curveIndex += subAnim.Curves.Count;
-                    infoIndex += subAnim.PatternAnimInfos.Count;
+                    infoIndex += subAnim.Curves.Count + (subAnim.Constants?.Count ?? 0);
 
                     if (calculateBakeSizes)
                     {
@@ -665,10 +734,10 @@ namespace BfresLibrary
                 foreach (var subAnim in anim.MaterialAnimDataList)
                 {
                     if (subAnim.Curves.Count > 0)
-                        subAnim.TexturePatternCurveIndex = curveIndex;
+                        subAnim.ShaderParamCurveIndex = curveIndex;
                     subAnim.InfoIndex = infoIndex;
                     curveIndex += subAnim.Curves.Count;
-                    infoIndex += subAnim.PatternAnimInfos.Count;
+                    infoIndex += subAnim.Curves.Count + (subAnim.Constants?.Count ?? 0);
 
                     if (calculateBakeSizes)
                     {
@@ -691,7 +760,7 @@ namespace BfresLibrary
                         subAnim.ShaderParamCurveIndex = curveIndex;
                     subAnim.InfoIndex = infoIndex;
                     curveIndex += subAnim.Curves.Count;
-                    infoIndex += subAnim.ParamAnimInfos.Count;
+                    infoIndex += subAnim.Curves.Count + (subAnim.Constants?.Count ?? 0);
 
                     if (calculateBakeSizes)
                     {
@@ -709,8 +778,10 @@ namespace BfresLibrary
                     anim.BakedSize = 0;
                 foreach (var subAnim in anim.MaterialAnimDataList)
                 {
+                    //Visibility curves are indexed per material; the running curve count goes in VisualConstantIndex.
+                    subAnim.VisualConstantIndex = curveIndex;
                     if (subAnim.Curves.Count > 0)
-                        subAnim.VisalCurveIndex = curveIndex;
+                        subAnim.VisalCurveIndex = 0;
                     curveIndex += subAnim.Curves.Count;
 
                     if (calculateBakeSizes)
@@ -733,7 +804,7 @@ namespace BfresLibrary
                 }
             }
 
-            foreach (var anim in BoneVisibilityAnims.Values)
+            foreach (var anim in BoneVisibilityAnims.Values.Concat(MatVisibilityAnimsWiiU.Values))
             {
                 anim.BakedSize = 0;
                 foreach (var curve in anim.Curves)

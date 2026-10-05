@@ -680,8 +680,8 @@ namespace BfresLibrary.Core
         {
             byte value = self.ReadByte();
             return new Vector4F(
-                (value & 0b00001111) / 127f,
-                (value >> 4) / 127f,
+                (value & 0b00001111) / 15f,
+                (value >> 4) / 15f,
                 0,
                 0);
         }

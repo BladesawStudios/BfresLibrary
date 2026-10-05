@@ -143,14 +143,14 @@ namespace BfresLibrary.Switch
                 if (anim.Name.Contains("_ftp"))
                     resFile.TexPatternAnims.Add(anim.Name, anim);
                 else if(anim.Name.Contains("_fts"))
-                    resFile.ShaderParamAnims.Add(anim.Name, anim);
+                    resFile.TexSrtAnims.Add(anim.Name, anim);
                 else if (anim.Name.Contains("_fcl"))
                     resFile.ColorAnims.Add(anim.Name, anim);
                 else if (anim.Name.Contains("_fst"))
                     resFile.TexSrtAnims.Add(anim.Name, anim);
                 else if (anim.Name.Contains("_fvt"))
                     resFile.MatVisibilityAnims.Add(anim.Name, anim);
-                else if (anim.MaterialAnimDataList != null && anim.MaterialAnimDataList.Any(x => x.VisibilyCount > 0))
+                else if (anim.MaterialAnimDataList != null && PlatformConverters.VisibilityAnimConverter.IsVisibilityAnim(anim))
                     resFile.MatVisibilityAnims.Add(anim.Name, anim);
                 else if (anim.MaterialAnimDataList != null && anim.MaterialAnimDataList.Any(x => x.TexturePatternCount > 0))
                     resFile.TexPatternAnims.Add(anim.Name, anim);

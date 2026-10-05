@@ -116,8 +116,8 @@ namespace BfresLibrary
             Format_4_4_UNorm = 0x00000001,
             // 16 bits (16 x 1)
             Format_16_UNorm = 0x0000010A,
-            Format_16_UInt = 0x0000020A,
-            Format_16_SNorm = 0x0000030A,
+            Format_16_UInt = 0x0000030A,
+            Format_16_SNorm = 0x0000020A,
             Format_16_SInt = 0x0000040A,
             Format_16_Single = 0x0000050A,
             Format_16_UIntToSingle = 0x00000803,

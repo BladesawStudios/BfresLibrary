@@ -235,6 +235,16 @@ namespace BfresLibrary
 
         void IResData.Save(ResFileSaver saver)
         {
+            if (_value == null)
+            {
+                switch (Type)
+                {
+                    case UserDataType.Int32: _value = new int[0]; break;
+                    case UserDataType.Single: _value = new float[0]; break;
+                    case UserDataType.Byte: _value = new byte[0]; break;
+                    default: _value = new string[0]; break;
+                }
+            }
             if (saver.IsSwitch)
             {
                 saver.SaveString(Name);
