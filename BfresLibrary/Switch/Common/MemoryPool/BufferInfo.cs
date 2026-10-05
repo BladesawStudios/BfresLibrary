@@ -99,7 +99,13 @@ namespace BfresLibrary
         /// <summary>
         /// Gets or sets the buffer instance that stores face data first, then vertex buffer after.
         /// </summary>
-        public static long BufferOffset { get; set; } //Note this is temp
+        // Per thread, so that two files can be loaded at once. This is scratch held across the
+        // calls that make up one load - set while a vertex buffer is read, then read again to
+        // work out each mesh's face buffer offset - and as a plain static it silently gave one
+        // file's offsets to another the moment loading went parallel.
+        [System.ThreadStatic] private static long _bufferOffset;
+
+        public static long BufferOffset { get => _bufferOffset; set => _bufferOffset = value; }
 
         /// <summary>
         /// Gets or sets the buffer instance that stores face data
