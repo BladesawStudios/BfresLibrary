@@ -451,7 +451,7 @@ namespace BfresLibrary
                 foreach (var tex in this.Textures.Values)
                 {
                     var textureU = new WiiU.Texture();
-                    textureU.FromSwitch((Switch.SwitchTexture)tex, handle == PlatformConverters.ConverterHandle.BOTW ? PlatformConverters.BotwTextureFiles.BankSwizzle : (System.Func<WiiU.Texture, uint>)null);
+                    textureU.FromSwitch((Switch.SwitchTexture)tex);
                     textures.Add(textureU);
                 }
                 Textures.Clear();
@@ -492,6 +492,8 @@ namespace BfresLibrary
                         mesh.UpdateIndexBufferByteOrder(targetOrder);
                     }
                 }
+                if (!IsPlatformSwitch && handle == PlatformConverters.ConverterHandle.BOTW)
+                    PlatformConverters.MaterialConverterBOTW.BorrowRenderInfos(model);
                 foreach (var mat in model.Materials.Values)
                 {
                     if (IsPlatformSwitch)
@@ -542,6 +544,11 @@ namespace BfresLibrary
             }
             else
             {
+                //Wii U material comments are wide strings.
+                foreach (var data in Models.Values.SelectMany(x => x.Materials.Values).SelectMany(x => x.UserData.Values))
+                    if (data.Name == "comment" && data.Type == UserDataType.String)
+                        data.SetValue(data.GetValueStringArray(), true);
+
                 MatVisibilityAnimsWiiU.Clear();
                 foreach (var dict in new[] { ShaderParamAnims, ColorAnims, TexSrtAnims, TexPatternAnims, MatVisibilityAnims }) {
                     foreach (var anim in dict.Values.Where(PlatformConverters.VisibilityAnimConverter.IsVisibilityAnim)) {

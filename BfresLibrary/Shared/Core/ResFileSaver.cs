@@ -510,6 +510,17 @@ namespace BfresLibrary.Core
         // ---- METHODS (PRIVATE) --------------------------------------------------------------------------------------
 
 
+        /// <summary>
+        /// UTF-16 strings follow the file's byte order, as the loader expects.
+        /// </summary>
+        internal Encoding StringEncoding(Encoding encoding)
+        {
+            encoding = encoding ?? Encoding;
+            if (encoding.CodePage == Encoding.Unicode.CodePage && ByteOrder == ByteOrder.BigEndian)
+                return Encoding.BigEndianUnicode;
+            return encoding;
+        }
+
         private void WriteStrings()
         {
             // Sort the strings ordinally.
@@ -532,7 +543,7 @@ namespace BfresLibrary.Core
                 }
 
                 // Write the name.
-                Write(entry.Key, BinaryStringFormat.ZeroTerminated, entry.Value.Encoding ?? Encoding);
+                Write(entry.Key, BinaryStringFormat.ZeroTerminated, StringEncoding(entry.Value.Encoding));
                 Align(4);
             }
             BaseStream.SetLength(Position); // Workaround to make last alignment expand the file if nothing follows.

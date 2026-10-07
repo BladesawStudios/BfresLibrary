@@ -313,7 +313,8 @@ namespace BfresLibrary.WiiU
                 Depth = textureNX.ArrayLength;
             }
             TileMode = (GX2TileMode)Swizzling.GX2.getDefaultGX2TileMode((uint)Dim, Width, Height, 1, (uint)Format, 0, (uint)Use);
-            Swizzle = (bankSwizzle?.Invoke(this) ?? 0) << 8;
+            //BNTX keeps the GX2 bank/pipe swizzle the texture had on Wii U.
+            Swizzle = (bankSwizzle?.Invoke(this) ?? ((uint)textureNX.Texture.Swizzle & 7)) << 8;
 
             //Gather every slice (all mips, linear) and swizzle them into one GX2 surface.
             var slices = new byte[textureNX.ArrayLength][];

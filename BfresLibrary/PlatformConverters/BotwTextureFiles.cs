@@ -58,8 +58,8 @@ namespace BfresLibrary.PlatformConverters
         }
 
         /// <summary>
-        /// The GX2 bank/pipe swizzle BotW's Wii U textures use, which follows the texture's format and channel
-        /// selectors (it matches 98.8% of the game's textures).
+        /// A GX2 bank/pipe swizzle for a texture that has none recorded, following the texture's format and channel
+        /// selectors the way most BotW textures do. Converted Switch textures carry the original value in BNTX.
         /// </summary>
         public static uint BankSwizzle(WiiU.Texture texture)
         {

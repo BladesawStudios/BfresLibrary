@@ -1,5 +1,5 @@
 # BfresLibrary
-A reworked version of NintenTools.Bfres with Wii U and Switch support and many various improvements/features.
+A reworked version Killxgaming/BfresLibrary which is a reworked version of NintenTools.Bfres.
 
 ## Features
 - Support for nearly all bfres versions for Wii U and Switch platforms.
@@ -7,7 +7,7 @@ A reworked version of NintenTools.Bfres with Wii U and Switch support and many v
 - Support for accessing shader parameters.
 - In library swizzle methods to access deswizzled textures. (Note these are not decoded and will not output RGBA8 data, must be done by external code).
 - Many various improvements and bug fixes to the previous NintenTools library.
-- Almost full conversion between Wii U and Switch binaries. Materials have to either use a custom conversion profile like `BfresLibrary/PlatformConverters/Presets` or use the original switch materials in the place. [An example of this conversion process.](https://github.com/KillzXGaming/BfresPlatformConverter)
+- Full conversion between Wii U and Switch binaries
 ## Planned
 
 - Improve visibily animation support. Boolean bits have issues on some animations.

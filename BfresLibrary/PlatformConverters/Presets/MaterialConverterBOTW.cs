@@ -44,6 +44,9 @@ namespace BfresLibrary.PlatformConverters
 
         internal override void ConvertToWiiUMaterial(Material material)
         {
+            foreach (var sampler in material.Samplers)
+                sampler.Value.TexSampler.LodBias = WiiULodBias(material, sampler.Key);
+
             if (!material.RenderInfos.ContainsKey("gsys_render_state_mode"))
                 return;
 
@@ -103,6 +106,48 @@ namespace BfresLibrary.PlatformConverters
                     material.RenderInfos.RemoveKey(key);
         }
 
+        /// <summary>
+        /// A few Switch materials carry no render state infos. They get them from a material in the same model with the
+        /// same shader assignment, which on Wii U has the same render state.
+        /// </summary>
+        internal static void BorrowRenderInfos(Model model)
+        {
+            string Assign(Material m) => m.ShaderAssign == null ? "" : m.ShaderAssign.ShaderArchiveName + "|" + m.ShaderAssign.ShadingModelName + "|" +
+                string.Join(";", m.ShaderAssign.ShaderOptions.Keys.Select(k => k + "=" + m.ShaderAssign.ShaderOptions[k]));
+
+            foreach (var material in model.Materials.Values)
+            {
+                if (material.RenderInfos.ContainsKey("gsys_render_state_mode"))
+                    continue;
+                var assign = Assign(material);
+                var twin = model.Materials.Values.FirstOrDefault(x => x != material && x.RenderInfos.ContainsKey("gsys_render_state_mode") && Assign(x) == assign);
+                if (twin == null)
+                    continue;
+                foreach (var key in SwitchRenderInfos)
+                {
+                    if (!twin.RenderInfos.TryGetValue(key, out var info) || material.RenderInfos.ContainsKey(key))
+                        continue;
+                    if (info.Type == RenderInfoType.String) material.SetRenderInfo(key, info.GetValueStrings());
+                    else if (info.Type == RenderInfoType.Single) material.SetRenderInfo(key, info.GetValueSingles());
+                    else material.SetRenderInfo(key, info.GetValueInt32s());
+                }
+            }
+        }
+
+        /// <summary>
+        /// Switch samplers have no LoD bias. On Wii U, cube maps, the extra albedo layers and the main albedo of
+        /// character materials (material attribute 0 without indirect4) are sharpened by one level.
+        /// </summary>
+        private static float WiiULodBias(Material material, string sampler)
+        {
+            string Option(string key) => material.ShaderAssign != null && material.ShaderAssign.ShaderOptions.TryGetValue(key, out var v) ? v : null;
+
+            bool sharpen = sampler.StartsWith("_cm") || sampler.StartsWith("slime_nrm") || sampler == "_a2" || sampler == "_a3"
+                || (sampler == "_a1" && material.Samplers.ContainsKey("_a2"))
+                || (sampler == "_a0" && Option("uking_material_attribute") == "0" && Option("uking_enable_indirect4") == "0");
+            return sharpen ? -1 : 0;
+        }
+
         private static string GetString(Material material, string key) =>
             material.RenderInfos.TryGetValue(key, out var info) && info.Type == RenderInfoType.String ? info.GetValueStrings().FirstOrDefault() : null;
 
@@ -153,6 +198,9 @@ namespace BfresLibrary.PlatformConverters
 
             SetAlphaRefParam(material, material.RenderState.AlphaRefValue);
             material.RenderState = null;
+
+            foreach (var sampler in material.Samplers.Values)
+                sampler.TexSampler.LodBias = 0;
         }
 
         /// <summary>

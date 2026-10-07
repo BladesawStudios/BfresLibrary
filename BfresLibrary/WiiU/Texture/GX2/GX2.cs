@@ -536,20 +536,15 @@ namespace BfresLibrary.Swizzling
                 }
 
                 //Every slice of an array texture shares the level's surface; each one is swizzled into its own slice.
-                byte[] SwizzledData = null;
+                byte[] SwizzledData = new byte[surfOut.surfSize];
                 int sliceCount = slices != null && slices.Length > 0 ? slices.Length : 1;
                 for (int slice = 0; slice < sliceCount; slice++)
                 {
                     byte[] source = slices != null && slices.Length > 0 ? slices[slice] : imageData;
-                    byte[] data_ = new byte[surfOut.surfSize];
+                    byte[] data_ = new byte[size];
                     Array.Copy(source, offset, data_, 0, size);
-                    byte[] sliceData = GX2.swizzle(width_, height_, surfOut.depth, surfOut.height, (uint)Format, 0, 1, surfOut.tileMode, s,
-                            surfOut.pitch, surfOut.bpp, (uint)slice, 0, data_);
-                    if (SwizzledData == null)
-                        SwizzledData = sliceData;
-                    else
-                        for (int i = 0; i < SwizzledData.Length; i++)
-                            SwizzledData[i] |= sliceData[i];
+                    GX2.swizzleInto(width_, height_, surfOut.depth, surfOut.height, (uint)Format, 0, 1, surfOut.tileMode, s,
+                            surfOut.pitch, surfOut.bpp, (uint)slice, 0, data_, SwizzledData);
                 }
 
                 Swizzled.Add(dataAlignBytes.Concat(SwizzledData).ToArray());
@@ -800,11 +795,22 @@ namespace BfresLibrary.Swizzling
             return swizzleSurf(width, height, height_, depth, format_, aa, use, tileMode, swizzle_, pitch, bpp, slice, sample, data, 1);
         }
 
+        /// <summary>
+        /// Swizzles linear data into one slice of an existing surface.
+        /// </summary>
+        public static void swizzleInto(uint width, uint height, uint depth, uint height_, uint format_, uint aa, uint use, uint tileMode, uint swizzle_,
+     uint pitch, uint bpp, uint slice, uint sample, byte[] data, byte[] surface)
+        {
+            swizzleSurf(width, height, height_, depth, format_, aa, use, tileMode, swizzle_, pitch, bpp, slice, sample, data, 1, surface);
+        }
+
         private static byte[] swizzleSurf(uint width, uint height, uint surfHeight, uint depth, uint format, uint aa, uint use, uint tileMode, uint swizzle_,
-                uint pitch, uint bitsPerPixel, uint slice, uint sample, byte[] data, int swizzle)
+                uint pitch, uint bitsPerPixel, uint slice, uint sample, byte[] data, int swizzle, byte[] result = null)
         {
             uint bytesPerPixel = bitsPerPixel / 8;
-            byte[] result = new byte[data.Length];
+            result ??= new byte[data.Length];
+            ulong linearLength = (ulong)(swizzle == 0 ? result.Length : data.Length);
+            ulong surfaceLength = (ulong)(swizzle == 0 ? data.Length : result.Length);
 
             uint pipeSwizzle, bankSwizzle, pos_;
             ulong pos;
@@ -848,7 +854,7 @@ namespace BfresLibrary.Swizzling
 
                     pos_ = (uint)(y * width + x) * bytesPerPixel;
 
-                    if (pos_ + bytesPerPixel <= data.Length && pos + bytesPerPixel <= (ulong)data.Length)
+                    if (pos_ + bytesPerPixel <= linearLength && pos + bytesPerPixel <= surfaceLength)
                     {
                         if (swizzle == 0)
                         {
@@ -937,9 +943,9 @@ namespace BfresLibrary.Swizzling
                     tileMode = 7;
 
                 var surfOut = getSurfaceInfo((GX2SurfaceFormat)format_, width, height, depth, dim, tileMode, aa, 0);
-                //The alignments are in elements, which are 4x4 blocks for BCn formats.
-                uint elementWidth = IsFormatBCN((GX2SurfaceFormat)format_) ? (width + 3) / 4 : width;
-                uint elementHeight = IsFormatBCN((GX2SurfaceFormat)format_) ? (height + 3) / 4 : height;
+                //The alignments are in elements, which are 4x4 blocks for BCn formats (partial blocks not counted).
+                uint elementWidth = IsFormatBCN((GX2SurfaceFormat)format_) ? Math.Max(1, width / 4) : width;
+                uint elementHeight = IsFormatBCN((GX2SurfaceFormat)format_) ? Math.Max(1, height / 4) : height;
                 if (elementWidth < surfOut.pitchAlign && elementHeight < surfOut.heightAlign)
                 {
                     if (tileMode == 7)
