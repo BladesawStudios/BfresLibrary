@@ -162,7 +162,8 @@ namespace BfresLibrary.Switch
         public static void Save(ResFileSwitchSaver saver, ResFile resFile)
         {
             if (resFile.Models.Count > 0 && resFile.Models.Values.Any(x => x.Shapes.Count > 0)) {
-                resFile.MemoryPool = new MemoryPool();
+                // A mesh codec file has no memory pool or buffer info of its own; the codec puts them after the file.
+                resFile.MemoryPool = resFile.MeshCodecSave ? null : new MemoryPool();
                 resFile.BufferInfo = new BufferInfo();
 
                 foreach (var model in resFile.Models.Values)
@@ -222,7 +223,7 @@ namespace BfresLibrary.Switch
                 saver.SaveRelocateEntryToSection(saver.Position, 1, 1, 0, ResFileSwitchSaver.Section4, "Memory pool");
             saver.SaveMemoryPoolPointer();
 
-            if (resFile.BufferInfo != null)
+            if (resFile.BufferInfo != null && !resFile.MeshCodecSave)
                 saver.SaveRelocateEntryToSection(saver.Position, 1, 1, 0, ResFileSwitchSaver.Section1, "Buffer info");
 
             resFile.BufferInfoOffset = saver.SaveOffset();
@@ -251,11 +252,19 @@ namespace BfresLibrary.Switch
 
             if (saver.ResFile.VersionMajor >= 9)
             {
-                saver.Write((byte)0); //external flags (set to 0)
-                if (saver.ResFile.VersionMajor >= 10)
-                    saver.Write((byte)1); //saved flags
-                else
+                if (resFile.MeshCodecSave)
+                {
+                    saver.Write((byte)resFile.ExternalFlag); //the flag that says the mesh section is outside the file
                     saver.Write((byte)0);
+                }
+                else
+                {
+                    saver.Write((byte)0); //external flags (set to 0)
+                    if (saver.ResFile.VersionMajor >= 10)
+                        saver.Write((byte)1); //saved flags
+                    else
+                        saver.Write((byte)0);
+                }
             }
             else
                 saver.Seek(6); // padding

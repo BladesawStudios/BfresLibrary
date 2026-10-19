@@ -539,7 +539,11 @@ namespace BfresLibrary.Switch.Core
                 foreach (SceneAnim scnanim in ResFile.SceneAnims.Values)
                     ((IResData)scnanim).Save(this);
             }
-            if (ResFile.BufferInfo != null)
+            if (ResFile.MeshCodecSave)
+            {
+                // The codec writes the buffer info after the file, so the pointer to it stays empty.
+            }
+            else if (ResFile.BufferInfo != null)
             {
                 WriteOffset(ResFile.BufferInfoOffset);
                 ((IResData)ResFile.BufferInfo).Save(this);
@@ -623,18 +627,28 @@ namespace BfresLibrary.Switch.Core
 
             WriteStrings();
 
-            if (ResFile.BufferInfo != null)
+            if (ResFile.MeshCodecSave)
             {
-                WriteIndexBuffer();
-                WriteVertexBuffer();
+                BuildMeshCodecStreams();
             }
-            if (ResFile.MemoryPool != null)
-                WriteMemoryPool();
+            else
+            {
+                if (ResFile.BufferInfo != null)
+                {
+                    WriteIndexBuffer();
+                    WriteVertexBuffer();
+                }
+                if (ResFile.MemoryPool != null)
+                    WriteMemoryPool();
+            }
 
             WriteBlocks(); //External files
 
             //First setup the values for RLT
-            SetupRelocationTable();
+            if (ResFile.MeshCodecSave)
+                SetupRelocationTableMeshCodec();
+            else
+                SetupRelocationTable();
             //Now write
             WriteRelocationTable();
 
@@ -706,7 +720,7 @@ namespace BfresLibrary.Switch.Core
         uint SectionCount = 5;
         private void WriteRelocationTable()
         {
-            Align(256);
+            Align(ResFile.MeshCodecSave ? 32 : 256);
 
             uint relocationTableOffset = (uint)Position;
             WriteSignature("_RLT");
@@ -1798,6 +1812,66 @@ namespace BfresLibrary.Switch.Core
                 if (Position % align != 0) Position = Position + (align - (Position % align));
                 Write(ResFile.BufferInfo.VertexBufferData[i]);
             }
+        }
+
+        /// <summary>
+        /// Keeps the mesh buffers out of the file and hands them back as the two streams of a mesh codec package. The index buffers come first,
+        /// each at eight bytes, then the vertex buffers, which is the order the offsets in the meshes and vertex buffers were worked out in.
+        /// </summary>
+        private void BuildMeshCodecStreams()
+        {
+            MemoryStream index = new MemoryStream(), vertex = new MemoryStream();
+
+            foreach (Model model in ResFile.Models.Values)
+                foreach (Shape shape in model.Shapes.Values)
+                    foreach (Mesh mesh in shape.Meshes)
+                    {
+                        PadStream(index, 8);
+                        index.Write(mesh.Data, 0, mesh.Data.Length);
+                    }
+            PadStream(index, 8);
+
+            foreach (Model model in ResFile.Models.Values)
+                foreach (VertexBuffer vtx in model.VertexBuffers)
+                {
+                    if (vtx.GPUBufferAlignent > 8)
+                        throw new NotSupportedException("A vertex buffer aligned to more than eight bytes cannot be placed in a mesh codec package.");
+
+                    foreach (var buff in vtx.Buffers)
+                    {
+                        PadStream(vertex, 8);
+                        vertex.Write(buff.Data[0], 0, buff.Data[0].Length);
+                    }
+                }
+
+            ResFile.MeshCodecResult = new MeshCodecParts { IndexStream = index.ToArray(), VertexStream = vertex.ToArray() };
+        }
+
+        private static void PadStream(MemoryStream stream, int align)
+        {
+            while (stream.Length % align != 0) stream.WriteByte(0);
+        }
+
+        /// <summary>
+        /// Relocation table of a mesh codec file: every pointer in the file is in the first section, which runs up to the table, and the
+        /// four sections for the buffers and the memory pool are empty because the codec supplies them.
+        /// </summary>
+        internal void SetupRelocationTableMeshCodec()
+        {
+            Align(32);
+            uint tableStart = (uint)Position;
+
+            List<RelocationEntry> all = new List<RelocationEntry>();
+            all.AddRange(_savedSection1Entries);
+            all.AddRange(_savedSection2Entries);
+            all.AddRange(_savedSection3Entries);
+            all.AddRange(_savedSection4Entries);
+            all.AddRange(_savedSection5Entries);
+            all = all.OrderBy(o => o.Position).ToList();
+
+            _savedRelocatedSections.Add(new RelocationSection(0, 0, tableStart, all));
+            for (int i = 0; i < 4; i++)
+                _savedRelocatedSections.Add(new RelocationSection(tableStart, all.Count, 0, new List<RelocationEntry>()));
         }
 
         public override void SatisfyOffsets(List<uint> offsets, uint target)

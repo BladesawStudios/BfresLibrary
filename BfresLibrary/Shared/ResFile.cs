@@ -384,6 +384,42 @@ namespace BfresLibrary
 
         public ExternalFlags ExternalFlag;
 
+        // True while SaveMeshCodec is saving: the file is written without its mesh buffers, as the game's .bfres.mc files hold them.
+        internal bool MeshCodecSave;
+
+        // What the saver leaves for SaveMeshCodec to hand back: the buffers it kept out of the file.
+        internal MeshCodecParts MeshCodecResult;
+
+        /// <summary>
+        /// Saves the file as the game's mesh codec packages hold it: the BFRES alone, with no vertex or index data in it, and those buffers as
+        /// the two streams the mesh section is made from. The file must have been read from such a package.
+        /// </summary>
+        public MeshCodecParts SaveMeshCodec()
+        {
+            if (!ExternalFlag.HasFlag(ExternalFlags.HasExternalGPU))
+                throw new InvalidOperationException("This file was not read from a mesh codec package, so it has no external mesh section to write.");
+
+            using MemoryStream stream = new MemoryStream();
+            MeshCodecSave = true;
+            MeshCodecResult = null;
+            long bufferOffset = BufferInfo.BufferOffset;
+            try
+            {
+                BufferInfo.BufferOffset = 0;
+                Save(stream, true);
+            }
+            finally
+            {
+                MeshCodecSave = false;
+                BufferInfo.BufferOffset = bufferOffset;
+            }
+
+            MeshCodecParts parts = MeshCodecResult ?? throw new InvalidOperationException("The saver produced no mesh buffers.");
+            MeshCodecResult = null;
+            parts.Body = stream.ToArray();
+            return parts;
+        }
+
         // ---- METHODS (INTERNAL) ---------------------------------------------------------------------------------------
 
         internal void SetVersionInfo(uint Version)
