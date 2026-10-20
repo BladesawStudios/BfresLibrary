@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Collections;
 using System.Collections.Generic;
@@ -443,7 +443,21 @@ namespace BfresLibrary
 
         void IResData.Save(ResFileSaver saver)
         {
-            if (saver.IsSwitch)
+            if (saver.IsSwitch && HasRawKeys)
+            {
+                // A dictionary the game keyed by hash is written as it was read: its trie was made from the names the hashes stand for, which the file no longer has, so it cannot be made again,
+                // and a hash is not a pointer, so nothing in it is relocated.
+                saver.Write(0);
+                saver.Write(Count);
+                foreach (Node node in _nodes)
+                {
+                    saver.Write(node.Reference);
+                    saver.Write(node.IdxLeft);
+                    saver.Write(node.IdxRight);
+                    saver.Write(node.RawKey ?? 0UL);
+                }
+            }
+            else if (saver.IsSwitch)
             {
                 // Update the Patricia trie values in the nodes.
                 var newNodes = Switch.ResDictUpdate.UpdateNodes(Keys.ToList());
@@ -547,19 +561,33 @@ namespace BfresLibrary
         /// <returns>The loaded <see cref="IResData"/> instance.</returns>
         protected abstract IResData LoadNodeValue(ResFileLoader loader);
 
+        // ---- HASHED KEYS --------------------------------------------------------------------------------------------
+
+        /// <summary>Whether every key was filed under a hash in the file this was read from, and so is written back as one.</summary>
+        internal bool HasRawKeys => _nodes.Count > 1 && _nodes.Skip(1).All(n => n.RawKey.HasValue);
+
+        /// <summary>The hashes the keys were filed under, in order, when <see cref="HasRawKeys"/>.</summary>
+        internal IReadOnlyList<ulong> RawKeys => _nodes.Skip(1).Select(n => n.RawKey.GetValueOrDefault()).ToList();
+
         // ---- METHODS (PRIVATE) --------------------------------------------------------------------------------------
 
         private Node ReadNode(ResFileLoader loader)
         {
             if (loader.IsSwitch)
             {
-                return new Node()
+                Node node = new Node()
                 {
                     Reference = loader.ReadUInt32(),
                     IdxLeft = loader.ReadUInt16(),
                     IdxRight = loader.ReadUInt16(),
-                    Key = loader.LoadString(),
                 };
+                ulong raw;
+                using (loader.TemporarySeek())
+                    raw = loader.ReadUInt64();
+                node.Key = loader.LoadString();
+                // A key that is no offset into the file is a hash, which is what the game's models use for names it looks up afterwards.
+                if (raw != 0 && raw >= (ulong)loader.BaseStream.Length) node.RawKey = raw;
+                return node;
             }
             else
             {
@@ -729,6 +757,9 @@ namespace BfresLibrary
             internal ushort IdxRight;
             internal string Key;
             internal IResData Value;
+
+            // The 64-bit hash a key was filed under where the file names it by hash (the game's models name their render infos, shader parameters and shader options that way), else null.
+            internal ulong? RawKey;
 
             internal Node()
             {

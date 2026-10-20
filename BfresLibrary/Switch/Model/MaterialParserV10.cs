@@ -1,4 +1,4 @@
-﻿using BfresLibrary.Core;
+using BfresLibrary.Core;
 using BfresLibrary.Switch.Core;
 using System;
 using System.Collections.Generic;
@@ -14,9 +14,12 @@ namespace BfresLibrary.Switch
         public static void PrepareSave(Material mat)
         {
             var info = new ShaderInfo();
+            ShaderAssignV10 previous = mat.ShaderInfoV10?.ShaderAssign;
 
             info.ShaderAssign = new ShaderAssignV10();
             info.ShaderAssign.ParentMaterial = mat;
+            // The assign as the file had it, which still holds the dictionaries the game keyed by hash.
+            info.ShaderAssign.Original = previous?.Original ?? previous;
             info.ShaderAssign.ShaderArchiveName = mat.ShaderAssign.ShaderArchiveName;
             info.ShaderAssign.ShadingModelName = mat.ShaderAssign.ShadingModelName;
             info.ShaderAssign.ParamCount = (ushort)mat.ShaderParams.Count;
@@ -92,14 +95,20 @@ namespace BfresLibrary.Switch
                     info.ShaderAssign.Options.Add(op.Key, op.Value);
             }
 
-            List<RenderInfo> renderInfoOrdered = new List<RenderInfo>();
-            renderInfoOrdered.AddRange(mat.RenderInfos.Values.Where(x => x.Type == RenderInfoType.String));
-            renderInfoOrdered.AddRange(mat.RenderInfos.Values.Where(x => x.Type == RenderInfoType.Single));
-            renderInfoOrdered.AddRange(mat.RenderInfos.Values.Where(x => x.Type == RenderInfoType.Int32));
+            // Render infos the game names by hash stay in the order the file had them: its dictionary of them was built from the names, which are not in the file, and its entries are found by
+            // the position they have in the list, so a different order would make every lookup find another render info. Others are grouped by type, as the older files have them.
+            bool namedByHash = mat.RenderInfos.Count > 0 && mat.RenderInfos.Values.All(x => x.NameHash != 0);
+            if (!namedByHash)
+            {
+                List<RenderInfo> renderInfoOrdered = new List<RenderInfo>();
+                renderInfoOrdered.AddRange(mat.RenderInfos.Values.Where(x => x.Type == RenderInfoType.String));
+                renderInfoOrdered.AddRange(mat.RenderInfos.Values.Where(x => x.Type == RenderInfoType.Single));
+                renderInfoOrdered.AddRange(mat.RenderInfos.Values.Where(x => x.Type == RenderInfoType.Int32));
 
-            mat.RenderInfos.Clear();
-            foreach (var renderInfo in renderInfoOrdered)
-                mat.RenderInfos.Add(renderInfo.Name, renderInfo);
+                mat.RenderInfos.Clear();
+                foreach (var renderInfo in renderInfoOrdered)
+                    mat.RenderInfos.Add(renderInfo.Name, renderInfo);
+            }
 
             mat.ShaderInfoV10 = info;
         }
@@ -347,13 +356,6 @@ namespace BfresLibrary.Switch
                 saver.Write(new byte[renderInfoDataSize]);
                 saver.Seek(pos, SeekOrigin.Begin);
 
-                var infoStrings = mat.RenderInfos.Values.Where(x => x.Type == RenderInfoType.String).ToList();
-                if (infoStrings.Count > 0)
-                {
-                    int numStrings = infoStrings.Sum(x => x.GetValueStrings().Length);
-
-                    saver.SaveRelocateEntryToSection(saver.Position, (uint)numStrings, 1, 0, ResFileSwitchSaver.Section1, "Render Info Strings V10");
-                }
                 long startpos = saver.Position;
                 foreach (var renderInfo in mat.RenderInfos.Values)
                 {
@@ -361,7 +363,12 @@ namespace BfresLibrary.Switch
 
                     switch (renderInfo.Type)
                     {
-                        case RenderInfoType.String: renderInfo.SaveStrings(saver); break;
+                        // The strings are pointers and the rest of the data is not, and the types can be in any order, so each run of strings is relocated where it stands.
+                        case RenderInfoType.String:
+                            if (renderInfo.GetValueStrings().Length > 0)
+                                saver.SaveRelocateEntryToSection(saver.Position, (uint)renderInfo.GetValueStrings().Length, 1, 0, ResFileSwitchSaver.Section1, "Render Info Strings V10");
+                            renderInfo.SaveStrings(saver);
+                            break;
                         case RenderInfoType.Single: renderInfo.SaveFloats(saver); break;
                         default: renderInfo.SaveInts(saver); break;
                     }
@@ -599,6 +606,9 @@ namespace BfresLibrary.Switch
 
             public Material ParentMaterial;
 
+            // The assign this one was made from when the material was read from a file, whose hashed dictionaries are written back as they were while the names they stand for are unchanged.
+            public ShaderAssignV10 Original;
+
             void IResData.Load(ResFileLoader loader)
             {
                 ShaderArchiveName = loader.LoadString();
@@ -628,30 +638,36 @@ namespace BfresLibrary.Switch
                 saver.SaveString(ShadingModelName);
                 saver.SaveCustom(new long[ParentMaterial.RenderInfos.Count], () =>
                 {
-                    if (ParentMaterial.RenderInfos.Count > 0)
-                        ((ResFileSwitchSaver)saver).SaveRelocateEntryToSection(saver.Position, 1, (uint)ParentMaterial.RenderInfos.Count, 1, ResFileSwitchSaver.Section1, "Render Param Info V10");
-
                     foreach (var renderInfo in ParentMaterial.RenderInfos.Values)
                     {
                         //A hash where the file names it by hash, a string where it does not -
                         //the eight bytes are the same either way, and writing a string into a
                         //file the game reads as a hash would be writing a pointer it would
-                        //follow somewhere meaningless.
+                        //follow somewhere meaningless. Only a string is a pointer the loader
+                        //relocates: a hash in the relocation table has the load address added
+                        //to it, and the game then cannot find the name it is looking up.
                         if (renderInfo.NameHash != 0) saver.Write(renderInfo.NameHash);
-                        else saver.SaveString(renderInfo.Name);
+                        else
+                        {
+                            ((ResFileSwitchSaver)saver).SaveRelocateEntryToSection(saver.Position, 1, 1, 1, ResFileSwitchSaver.Section1, "Render Param Info V10");
+                            saver.SaveString(renderInfo.Name);
+                        }
 
                         saver.Write((byte)renderInfo.Type);
                         saver.Write(new byte[7]);
                     }
                 });
-                saver.SaveDict(ParentMaterial.RenderInfos);
+                if (SameHashes(Original?.RenderInfos, ParentMaterial.RenderInfos.Values.Select(r => r.NameHash)))
+                    saver.SaveDict(Original.RenderInfos);
+                else
+                    saver.SaveDict(ParentMaterial.RenderInfos);
                 saver.SaveCustom(new long[ParentMaterial.ShaderParams.Count], () =>
                 {
-                    if (ParentMaterial.ShaderParams.Count > 0)
-                        ((ResFileSwitchSaver)saver).SaveRelocateEntryToSection(saver.Position, 2, (uint)ParentMaterial.ShaderParams.Count, 1, ResFileSwitchSaver.Section1, "Shader Param Info V10");
-
                     foreach (var param in ParentMaterial.ShaderParams.Values)
                     {
+                        // As above: a name that is a hash is not a pointer and is not relocated.
+                        if (param.NameHash == 0)
+                            ((ResFileSwitchSaver)saver).SaveRelocateEntryToSection(saver.Position, 2, 1, 1, ResFileSwitchSaver.Section1, "Shader Param Info V10");
                         saver.Write(new byte[8]);
 
                         if (param.NameHash != 0) saver.Write(param.NameHash);
@@ -661,15 +677,36 @@ namespace BfresLibrary.Switch
                         saver.Write(new byte[4]);
                     }
                 });
-                saver.SaveDict(ParentMaterial.ShaderParams);
+                if (SameHashes(Original?.ShaderParameters, ParentMaterial.ShaderParams.Values.Select(p => p.NameHash)))
+                    saver.SaveDict(Original.ShaderParameters);
+                else
+                    saver.SaveDict(ParentMaterial.ShaderParams);
                 saver.SaveDict(AttributeAssign);
                 saver.SaveDict(SamplerAssign);
-                saver.SaveDict(Options);
+                if (Original?.Options != null && Original.Options.HasRawKeys && SameOptionKeys(Original.Options, Options))
+                    saver.SaveDict(Original.Options);
+                else
+                    saver.SaveDict(Options);
                 saver.Write((ushort)ParentMaterial.RenderInfos.Count);
                 saver.Write((ushort)ParentMaterial.ShaderParams.Count);
                 saver.Write((ushort)ParentMaterial.ShaderParamData.Length);
                 saver.Write((ushort)0);//padding
                 saver.Write(0UL);//padding
+            }
+
+            // Whether a dictionary read from the file was keyed by the hashes the material still has, in the same order.
+            static bool SameHashes(ResDict<ResString> original, IEnumerable<ulong> current) =>
+                original != null && original.HasRawKeys && original.RawKeys.SequenceEqual(current);
+
+            // The options are named as they were read (an unreadable name gets its number added, which is all that may differ).
+            static bool SameOptionKeys(ResDict<ResString> original, ResDict<ResString> current)
+            {
+                var was = original.Keys.ToList();
+                var now = current.Keys.ToList();
+                if (was.Count != now.Count) return false;
+                for (int i = 0; i < was.Count; i++)
+                    if (now[i] != was[i] && now[i] != $"{was[i]}#{i}") return false;
+                return true;
             }
 
             public override int GetHashCode()
