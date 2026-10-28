@@ -28,7 +28,8 @@ namespace BfresLibrary
         /// TotK's v10 materials name their shader options this way: where a string offset would be,
         /// there is a 64-bit key into the game's shared <c>Shader/ExternalBinaryString.bfres</c>, which
         /// the engine resolves with a binary search at load. An offset that points past the end of the
-        /// file is one of these. The table lives outside the file, so reading it is the caller's job.
+        /// file is one of these. Their render infos and shader params are named by keys into the same
+        /// table, so it names those too. The table lives outside the file, so reading it is the caller's job.
         /// </remarks>
         public static Func<ulong, string> ExternalStringResolver { get; set; }
 
