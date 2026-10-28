@@ -204,7 +204,7 @@ namespace BfresLibrary.Switch
                 loader.Seek((int)info.ShaderAssign.renderInfoListOffset + i * 16, SeekOrigin.Begin);
                 renderInfo.NameHash = loader.ReadUInt64();
                 renderInfo.Type = (RenderInfoType)loader.ReadByte();
-                renderInfo.Name = $"0x{renderInfo.NameHash:X16}";
+                renderInfo.Name = HashedName(renderInfo.NameHash);
 
 
 
@@ -244,6 +244,17 @@ namespace BfresLibrary.Switch
             return $"{name}#{index}";
         }
 
+        /// <summary>
+        /// The name a render info or shader param hash stands for.
+        /// </summary>
+        /// <remarks>
+        /// The hashes are keys into the same string table outside the file that
+        /// <see cref="ResFile.ExternalStringResolver"/> reads, so it names them when it is set. Without it,
+        /// or for a key it does not know, the hash itself is the name.
+        /// </remarks>
+        static string HashedName(ulong hash) =>
+            ResFile.ExternalStringResolver?.Invoke(hash) ?? $"0x{hash:X16}";
+
         static void ReadShaderParams(ResFileLoader loader, ShaderInfo info, Material mat)
         {
             for (int i = 0; i < info.ShaderAssign.ShaderParameters.Count; i++)
@@ -259,7 +270,7 @@ namespace BfresLibrary.Switch
                 param.Type = (ShaderParamType)loader.ReadUInt16();
                 var pad2 = loader.ReadUInt32(); //padding
 
-                param.Name = $"0x{param.NameHash:X16}";
+                param.Name = HashedName(param.NameHash);
 
                 param.Name = UniqueName(mat.ShaderParams.Keys, param.Name, i);
                 mat.ShaderParams.Add(param.Name, param);
