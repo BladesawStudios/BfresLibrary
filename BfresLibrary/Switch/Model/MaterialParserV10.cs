@@ -190,21 +190,21 @@ namespace BfresLibrary.Switch
             loader.Seek(pos, SeekOrigin.Begin);
         }
 
-        static void ReadRenderInfo(ResFileLoader loader, ShaderInfo info, Material mat,
+        static void ReadRenderInfo(ResFileSwitchLoader loader, ShaderInfo info, Material mat,
             long renderInfoCounterTable, long renderInfoDataOffsets, long renderInfoDataTable)
         {
             for (int i = 0; i < info.ShaderAssign.RenderInfos.Count; i++)
             {
                 RenderInfo renderInfo = new RenderInfo();
 
-                //Info table. Sixteen bytes an entry: a 64-bit hash of the name where earlier
-                //files put a pointer to it, then the type. There is no string to read - the
-                //name is not in the file at all - so reading one gave an empty string for
-                //every entry, and filing two of those threw.
+                //Info table. Sixteen bytes an entry: the name, then the type. The game's own
+                //files put a 64-bit hash of the name there; files other tools write put a
+                //pointer to the name in the file, and the game reads both.
                 loader.Seek((int)info.ShaderAssign.renderInfoListOffset + i * 16, SeekOrigin.Begin);
-                renderInfo.NameHash = loader.ReadUInt64();
+                ulong renderInfoKey = loader.ReadUInt64();
                 renderInfo.Type = (RenderInfoType)loader.ReadByte();
-                renderInfo.Name = HashedName(renderInfo.NameHash);
+                renderInfo.Name = NameOf(loader, renderInfoKey, out ulong renderInfoHash);
+                renderInfo.NameHash = renderInfoHash;
 
 
 
@@ -255,22 +255,41 @@ namespace BfresLibrary.Switch
         static string HashedName(ulong hash) =>
             ResFile.ExternalStringResolver?.Invoke(hash) ?? $"0x{hash:X16}";
 
-        static void ReadShaderParams(ResFileLoader loader, ShaderInfo info, Material mat)
+        /// <summary>
+        /// The name an eight-byte render info or shader param name field stands for.
+        /// </summary>
+        /// <remarks>
+        /// A field that points inside the file is a string there, and its hash is zero so that saving writes the
+        /// name back as a string. Anything else is the game's hash of the name.
+        /// </remarks>
+        static string NameOf(ResFileSwitchLoader loader, ulong key, out ulong hash)
+        {
+            if (loader.HoldsString(key))
+            {
+                hash = 0;
+                return loader.StringAt((long)key);
+            }
+            hash = key;
+            return HashedName(key);
+        }
+
+        static void ReadShaderParams(ResFileSwitchLoader loader, ShaderInfo info, Material mat)
         {
             for (int i = 0; i < info.ShaderAssign.ShaderParameters.Count; i++)
             {
                 ShaderParam param = new ShaderParam();
 
-                //Twenty-four bytes an entry: padding, the 64-bit name hash, then the offset
-                //into the parameter data and the type.
+                //Twenty-four bytes an entry: padding, the name (a hash or a pointer, as for
+                //render infos), then the offset into the parameter data and the type.
                 loader.Seek((int)info.ShaderAssign.shaderParamOffset + i * 24, SeekOrigin.Begin);
                 var pad0 = loader.ReadUInt64(); //padding
-                param.NameHash = loader.ReadUInt64();
+                ulong paramKey = loader.ReadUInt64();
                 param.DataOffset = loader.ReadUInt16();
                 param.Type = (ShaderParamType)loader.ReadUInt16();
                 var pad2 = loader.ReadUInt32(); //padding
 
-                param.Name = HashedName(param.NameHash);
+                param.Name = NameOf(loader, paramKey, out ulong paramHash);
+                param.NameHash = paramHash;
 
                 param.Name = UniqueName(mat.ShaderParams.Keys, param.Name, i);
                 mat.ShaderParams.Add(param.Name, param);
