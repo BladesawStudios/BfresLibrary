@@ -110,7 +110,20 @@ namespace BfresLibrary.Switch.Core
         {
             var offset = ReadInt64();
             if (offset == 0) return null;
+            return StringAt(offset, encoding);
+        }
 
+        /// <summary>
+        /// Whether an eight-byte name field points to a string in this file, rather than being a key the game looks
+        /// up outside it.
+        /// </summary>
+        internal bool HoldsString(ulong key) => key != 0 && key <= (ulong)BaseStream.Length;
+
+        /// <summary>
+        /// The string at an offset in this file, or past its end the one the external string table keys by it.
+        /// </summary>
+        internal string StringAt(long offset, Encoding encoding = null)
+        {
             if (StringCache.Strings.ContainsKey(offset))
                 return StringCache.Strings[offset];
 
