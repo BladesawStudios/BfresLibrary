@@ -66,8 +66,8 @@ namespace BfresLibrary.Switch
                     }
                     return;
                 }
-                //GPU section for TOTK
-                if (flag.HasFlag(ResFile.ExternalFlags.HasExternalGPU))
+                //GPU section for TOTK, after the file. A file with buffer info of its own keeps its buffers inside.
+                if (flag.HasFlag(ResFile.ExternalFlags.HasExternalGPU) && resFile.BufferInfo == null && loader.BaseStream.Length >= sizFile + 288L)
                 {
                     using (loader.TemporarySeek(sizFile, SeekOrigin.Begin))
                     {
@@ -140,15 +140,15 @@ namespace BfresLibrary.Switch
             //Split material animations into shader, texture, and visual animation lists
             foreach (var anim in resFile.MaterialAnims.Values)
             {
-                if (anim.Name.Contains("_ftp"))
+                if (HasKind(anim.Name, "ftp"))
                     resFile.TexPatternAnims.Add(anim.Name, anim);
-                else if(anim.Name.Contains("_fts"))
+                else if (HasKind(anim.Name, "fts"))
                     resFile.TexSrtAnims.Add(anim.Name, anim);
-                else if (anim.Name.Contains("_fcl"))
+                else if (HasKind(anim.Name, "fcl"))
                     resFile.ColorAnims.Add(anim.Name, anim);
                 else if (anim.Name.Contains("_fst"))
                     resFile.TexSrtAnims.Add(anim.Name, anim);
-                else if (anim.Name.Contains("_fvt"))
+                else if (anim.Name.Contains("_fvt") || HasKind(anim.Name, "fvm"))
                     resFile.MatVisibilityAnims.Add(anim.Name, anim);
                 else if (anim.MaterialAnimDataList != null && PlatformConverters.VisibilityAnimConverter.IsVisibilityAnim(anim))
                     resFile.MatVisibilityAnims.Add(anim.Name, anim);
@@ -158,6 +158,8 @@ namespace BfresLibrary.Switch
                     resFile.ShaderParamAnims.Add(anim.Name, anim);
             }
         }
+
+        private static bool HasKind(string name, string kind) => name.Contains("_" + kind) || name.Contains("." + kind);
 
         public static void Save(ResFileSwitchSaver saver, ResFile resFile)
         {
