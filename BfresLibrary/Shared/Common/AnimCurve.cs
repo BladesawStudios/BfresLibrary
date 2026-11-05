@@ -268,7 +268,7 @@ namespace BfresLibrary
             {
                 int elementsPerKey = ElementsPerKey;
                 //Bool keys are packed 32 per word.
-                int numRows = CurveType == AnimCurveType.StepBool ? (numKey + 31) / 32 : numKey;
+                int numRows = CurveType == AnimCurveType.StepBool && KeyType == AnimCurveKeyType.Single ? (numKey + 31) / 32 : numKey;
                 float[,] keys = new float[numRows, elementsPerKey];
                 switch (KeyType)
                 {
@@ -320,6 +320,12 @@ namespace BfresLibrary
                 int keyIndex = 0;
 
                 KeyStepBoolData = new bool[numKey];
+                if (KeyType != AnimCurveKeyType.Single)
+                {
+                    //Narrow keys hold one value each rather than 32 bits to a word.
+                    for (int i = 0; i < numKey && i < Keys.GetLength(0); i++) KeyStepBoolData[i] = Keys[i, 0] != 0;
+                    return;
+                }
                 for (int i = 0; i < Keys.Length; i++) {
                     if (numKey <= keyIndex) break;
 
