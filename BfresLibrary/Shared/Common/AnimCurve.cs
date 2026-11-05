@@ -31,6 +31,8 @@ namespace BfresLibrary
 
         private const ushort _flagsMaskFrameType = 0b00000000_00000011;
         private const ushort _flagsMaskKeyType = 0b00000000_00001100;
+        //Set on a curve whose keys are quantized: the game reads these as Hermite or linear keys with a scale and offset of their own.
+        private const ushort _flagsCompressed = 0x4000;
         private const ushort _flagsMaskCurveType = 0b00000000_01110000;
 
         // ---- FIELDS -------------------------------------------------------------------------------------------------
@@ -204,6 +206,66 @@ namespace BfresLibrary
             return curve;
         }
 
+        //Reads the keys of a compressed curve, which are not the four coefficients of a segment the other files have.
+        //A cubic key is a value and a slope, a linear key a value, and the narrow ones are unsigned and scaled by Scale and Offset
+        //(a slope by a scale and offset that lead the key array). The segments are turned into the coefficients the rest of the
+        //library works with, so the curve reads as any other and no longer says it is compressed.
+        private float[,] ReadCompressedKeys(ResFileLoader loader, int numKey)
+        {
+            bool hermite = CurveType == AnimCurveType.Cubic;
+            bool narrow = KeyType != AnimCurveKeyType.Single;
+            float slopeScale = 1, slopeOffset = 0;
+            if (hermite && narrow)
+            {
+                slopeScale = loader.ReadSingle();
+                slopeOffset = loader.ReadSingle();
+            }
+
+            float scale = narrow ? Scale : 1, offset = narrow ? Offset : 0;
+            float[] values = new float[numKey], slopes = new float[numKey];
+            for (int i = 0; i < numKey; i++)
+            {
+                values[i] = Read(loader, scale, offset);
+                if (hermite) slopes[i] = Read(loader, slopeScale, slopeOffset);
+            }
+
+            float[,] keys = new float[numKey, ElementsPerKey];
+            for (int i = 0; i < numKey; i++)
+            {
+                keys[i, 0] = values[i];
+                if (i + 1 >= numKey || i + 1 >= Frames.Length) continue;
+
+                float span = Frames[i + 1] - Frames[i];
+                float diff = values[i + 1] - values[i];
+                if (hermite)
+                {
+                    keys[i, 1] = span * slopes[i];
+                    keys[i, 2] = 3 * diff - span * (2 * slopes[i] + slopes[i + 1]);
+                    keys[i, 3] = -2 * diff + span * (slopes[i] + slopes[i + 1]);
+                }
+                else
+                {
+                    keys[i, 1] = diff;
+                }
+            }
+
+            Scale = 1;
+            Offset = 0;
+            KeyType = AnimCurveKeyType.Single;
+            _flags = (ushort)(_flags & ~_flagsCompressed);
+            return keys;
+        }
+
+        private float Read(ResFileLoader loader, float scale, float offset)
+        {
+            switch (KeyType)
+            {
+                case AnimCurveKeyType.Int16: return loader.ReadUInt16() * scale + offset;
+                case AnimCurveKeyType.SByte: return loader.ReadByte() * scale + offset;
+                default: return loader.ReadSingle();
+            }
+        }
+
         void IResData.Load(ResFileLoader loader)
         {
             long FrameArrayOffset = 0;
@@ -217,10 +279,21 @@ namespace BfresLibrary
                 AnimDataOffset = loader.ReadUInt32();
                 StartFrame = loader.ReadSingle();
                 EndFrame = loader.ReadSingle();
-                Scale = loader.ReadSingle();
-                Offset = loader.ReadSingle();
-                Delta = loader.ReadSingle();
-                int padding = loader.ReadInt32();
+                if ((_flags & _flagsCompressed) != 0)
+                {
+                    //Compressed curves, which Switch 2 files use, keep a word nothing reads before the scale and offset.
+                    loader.ReadSingle();
+                    Scale = loader.ReadSingle();
+                    Offset = loader.ReadSingle();
+                    Delta = loader.ReadSingle();
+                }
+                else
+                {
+                    Scale = loader.ReadSingle();
+                    Offset = loader.ReadSingle();
+                    Delta = loader.ReadSingle();
+                    int padding = loader.ReadInt32();
+                }
             }
             else
             {
@@ -264,8 +337,11 @@ namespace BfresLibrary
                 }
             }, (uint)FrameArrayOffset);
             var boolWords = new List<uint>();
+            bool compressed = loader.IsSwitch && (_flags & _flagsCompressed) != 0
+                && (CurveType == AnimCurveType.Cubic || CurveType == AnimCurveType.Linear);
             Keys = loader.LoadCustom(() =>
             {
+                if (compressed) return ReadCompressedKeys(loader, numKey);
                 int elementsPerKey = ElementsPerKey;
                 //Bool keys are packed 32 per word.
                 int numRows = CurveType == AnimCurveType.StepBool && KeyType == AnimCurveKeyType.Single ? (numKey + 31) / 32 : numKey;
