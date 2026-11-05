@@ -121,6 +121,11 @@ namespace BfresLibrary
         public float Delta { get; set; }
 
         /// <summary>
+        /// Gets whether the curve was stored compressed in the file it was read from. It is held in the plain layout once read.
+        /// </summary>
+        public bool WasCompressed { get; private set; }
+
+        /// <summary>
         /// Gets the frame numbers at which keys of the same index in the <see cref="Keys"/> array are placed.
         /// </summary>
         public float[] Frames { get; set; }
@@ -210,8 +215,11 @@ namespace BfresLibrary
         //A cubic key is a value and a slope, a linear key a value, and the narrow ones are unsigned and scaled by Scale and Offset
         //(a slope by a scale and offset that lead the key array). The segments are turned into the coefficients the rest of the
         //library works with, so the curve reads as any other and no longer says it is compressed.
-        private float[,] ReadCompressedKeys(ResFileLoader loader, int numKey)
+        private float[,] ReadCompressedKeys(ResFileLoader loader, int numKey, List<uint> boolWords)
         {
+            if (CurveType == AnimCurveType.StepBool) return ReadCompressedBools(loader, numKey, boolWords);
+            if (CurveType == AnimCurveType.StepFloat || CurveType == AnimCurveType.StepInt) return ReadCompressedSteps(loader, numKey);
+
             bool hermite = CurveType == AnimCurveType.Cubic;
             bool narrow = KeyType != AnimCurveKeyType.Single;
             float slopeScale = 1, slopeOffset = 0;
@@ -249,11 +257,49 @@ namespace BfresLibrary
                 }
             }
 
+            MakePlain();
+            return keys;
+        }
+
+        //Boolean keys are bits, the first key the lowest of the first byte, whatever the key type says.
+        private float[,] ReadCompressedBools(ResFileLoader loader, int numKey, List<uint> boolWords)
+        {
+            uint[] words = new uint[System.Math.Max(1, (numKey + 31) / 32)];
+            int bytes = (numKey + 7) / 8;
+            for (int i = 0; i < bytes; i++) words[i / 4] |= (uint)loader.ReadByte() << (8 * (i % 4));
+
+            boolWords.AddRange(words);
+            float[,] keys = new float[words.Length, 1];
+            for (int i = 0; i < words.Length; i++) keys[i, 0] = words[i];
+            MakePlain();
+            return keys;
+        }
+
+        //Step keys are a float, or a narrow number with a scale and offset; an integer curve holds the whole number of it. They come out as the
+        //values themselves, as a curve of another file has them.
+        private float[,] ReadCompressedSteps(ResFileLoader loader, int numKey)
+        {
+            bool integer = CurveType == AnimCurveType.StepInt;
+            bool narrow = KeyType != AnimCurveKeyType.Single;
+            float scale = narrow ? Scale : 1, offset = narrow ? Offset : 0;
+            float[,] keys = new float[numKey, 1];
+            for (int i = 0; i < numKey; i++)
+            {
+                float value = Read(loader, scale, offset);
+                keys[i, 0] = integer ? (float)(int)value : value;
+            }
+
+            MakePlain();
+            return keys;
+        }
+
+        //The curve as the file would have it with no compression, for what is kept of it after its keys are read.
+        private void MakePlain()
+        {
             Scale = 1;
             Offset = 0;
             KeyType = AnimCurveKeyType.Single;
             _flags = (ushort)(_flags & ~_flagsCompressed);
-            return keys;
         }
 
         private float Read(ResFileLoader loader, float scale, float offset)
@@ -337,11 +383,13 @@ namespace BfresLibrary
                 }
             }, (uint)FrameArrayOffset);
             var boolWords = new List<uint>();
+            WasCompressed = loader.IsSwitch && (_flags & _flagsCompressed) != 0;
             bool compressed = loader.IsSwitch && (_flags & _flagsCompressed) != 0
-                && (CurveType == AnimCurveType.Cubic || CurveType == AnimCurveType.Linear);
+                && (CurveType == AnimCurveType.Cubic || CurveType == AnimCurveType.Linear || CurveType == AnimCurveType.StepFloat
+                    || CurveType == AnimCurveType.StepInt || CurveType == AnimCurveType.StepBool);
             Keys = loader.LoadCustom(() =>
             {
-                if (compressed) return ReadCompressedKeys(loader, numKey);
+                if (compressed) return ReadCompressedKeys(loader, numKey, boolWords);
                 int elementsPerKey = ElementsPerKey;
                 //Bool keys are packed 32 per word.
                 int numRows = CurveType == AnimCurveType.StepBool && KeyType == AnimCurveKeyType.Single ? (numKey + 31) / 32 : numKey;
@@ -622,6 +670,11 @@ namespace BfresLibrary
         /// 1 element of the <see cref="AnimCurve.Keys"/> array forms a key.
         /// </summary>
         BakedFloat = 2 << 4,
+
+        /// <summary>
+        /// The value of a key holds until the next one, and is a float. Switch 2 files use it.
+        /// </summary>
+        StepFloat = 3 << 4,
 
         /// <summary>
         /// 1 element of the <see cref="AnimCurve.Keys"/> array forms a key.
