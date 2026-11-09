@@ -185,8 +185,47 @@ namespace BfresLibrary.Switch
             if (Texture.TextureData[arrayLevel].Count < mipLevel)
                 throw new Exception($"Invalid mip level! {mipLevel}");
 
-            return TegraX1Swizzle.GetSliceImageData(Texture, ByteUtils.CombineArray(Texture.TextureData[arrayLevel].ToArray()), mipLevel,
-               Texture.BlockHeightLog2, 1, Texture.TileMode == TileMode.LinearAligned);
+            try
+            {
+                byte[] result = new byte[TegraX1Swizzle.GetMipLevelSize(Texture, mipLevel)];
+                GetDeswizzledData(arrayLevel, mipLevel, result);
+                return result;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Failed to swizzle texture {Texture.Name}!");
+                Console.WriteLine(e);
+                return new byte[0];
+            }
+        }
+
+        /// <summary>
+        /// Deswizzles a mip level into the destination, straight from the texture's own buffers: no allocation and no copy
+        /// of the source. The destination takes <see cref="TegraX1Swizzle.GetMipLevelSize"/> bytes; the count written is returned.
+        /// </summary>
+        public int GetDeswizzledData(int arrayLevel, int mipLevel, Span<byte> destination)
+        {
+            List<byte[]> mips = Texture.TextureData[arrayLevel];
+            bool linear = Texture.TileMode == TileMode.LinearAligned;
+            uint blockHeightLog2 = Texture.BlockHeightLog2;
+            uint offset = TegraX1Swizzle.GetMipLevelOffset(Texture, mipLevel, blockHeightLog2, out int mipBlockHeightLog2, out uint swizzledSize);
+
+            //The first buffer holds the whole slice when the file keeps it in one piece.
+            if (mips.Count > 0 && mips[0].Length >= (long)offset + swizzledSize)
+                return TegraX1Swizzle.DeswizzleMipLevel(Texture, mips[0], mipLevel, blockHeightLog2, destination, 1, linear);
+
+            //Otherwise each mip has a buffer of its own, which can be read where it is if it sits at the offset the layout gives it.
+            if (mipLevel < mips.Count && mips[mipLevel].Length >= swizzledSize)
+            {
+                long start = 0;
+                for (int i = 0; i < mipLevel; i++)
+                    start += mips[i].Length;
+                if (start == offset)
+                    return TegraX1Swizzle.DeswizzleMipData(Texture, mips[mipLevel], mipLevel, mipBlockHeightLog2, destination, 1, linear);
+            }
+
+            //The buffers don't line up with the layout (a truncated file): join them, as the layout expects.
+            return TegraX1Swizzle.DeswizzleMipLevel(Texture, ByteUtils.CombineArray(mips.ToArray()), mipLevel, blockHeightLog2, destination, 1, linear);
         }
 
         /// <summary>
